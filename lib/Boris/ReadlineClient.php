@@ -125,25 +125,30 @@ class ReadlineClient {
           return array();
       }
       $line = substr($rl_info['line_buffer'], 0, $rl_info['point']);
-      
-      /* HACK. Ugh. */
-      if(FALSE !== $pos = strpos($word, '['))
-          $prefix = substr($word, 0, $pos + 1);
-      elseif(FALSE !== $pos = strpos($word, '::'))
-          $prefix = substr($word, 0, $pos + 2);
-      else
-          $prefix = '';
 
       /* print("\ncompleting=$word\nprefix=$prefix\n"); */
       /* Call the EvalWorker to perform completion */
       $this->_write($this->_socket, EvalWorker::COMPLETE . $line);
-      $completions = $this->_read_unserialize();
+      $response = $this->_read_unserialize();
+      list($start, $end, $completions) = array($response->start, $response->end,
+                                               $response->completions);
 
-      /* HACK */
-      if($prefix) {
-          $completions = array_map(function($str) use ($prefix) {
-              return $prefix . $str; }, $completions);
+      $rl_start = $rl_info['point'] - strlen($word);
+      $rl_end = $rl_info['point'];
+
+      /* print("\nrl bounds=$rl_start .. $rl_end, word=$word\n"); */
+      /* print("new bounds=$start .. $end\n"); */
+      /* print_r($completions); */
+      if($start < $rl_start) {
+          foreach($completions as &$c) {
+              $c = substr($c, $rl_start - $start);
+          }
+      } elseif($start > $rl_start) {
+          foreach($completions as &$c) {
+              $c = substr($line, $rl_start, $start - $rl_start) . $c;
+          }
       }
+      /* print_r($completions); */
       return $completions;
   }
 
@@ -164,6 +169,9 @@ class ReadlineClient {
   private function _read($socket, $bytes) {
       for($read = ''; strlen($read) < $bytes; $read .= $fread) {
           $fread = fread($socket, $bytes - strlen($read));
+          if(0 === $fread) {
+              throw new \RuntimeException('Socket closed during read.');
+          }
       }
       return $read;
   }

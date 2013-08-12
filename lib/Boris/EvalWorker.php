@@ -158,8 +158,8 @@ class EvalWorker {
 
       case self::COMPLETE:
         $__input = substr($__input, 1);
-        if(preg_match("/(->|::[$]?)([[:alpha:]_]*[[:alnum:]_]*)$/", $__input, $match_data,
-                      PREG_OFFSET_CAPTURE)) {
+        if(preg_match("/(->|::)[[:space:]]*([$]?[[:alpha:]_]*[[:alnum:]_]*)$/",
+                      $__input, $__match_data, PREG_OFFSET_CAPTURE)) {
           /* Complete one of the following, depending on the
            * dereferencing operator:
            *
@@ -167,57 +167,54 @@ class EvalWorker {
            * an static method or constant '::xyz...',
            * or a static property '::$xyz...'
            */
-          $__operator = $match_data[1][0];
-          $__symbol = $match_data[2][0];
-          list($__completion_base, $__is_bare) = $this->_getCompletionBase($__input, $match_data[0][1]);
+          $__operator = $__match_data[1][0];
+          $__symbol = $__match_data[2][0];
+          list($__start, $__end) = $this->_matchBounds($__match_data[2]);
+          list($__completion_base, $__is_bare) = $this->_getCompletionBase($__input, $__match_data[0][1]);
           if($__is_bare)
             $__result = $__completion_base;
           else
             $__result = eval("return $__completion_base;");
-          switch($__operator) {
-          case '->':
+          if($__operator == '->')
             $__completions = $this->_objectMembers($__result);
-            break;
-          case '::':
+          else
             $__completions = $this->_staticMembers($__result);
-            break;
-          case '::$':
-            $__completions = $this->_staticProperties($__result);
-            break;
-          default:
-            /* Should never get here */
-            throw new \RuntimeException(sprintf("Unknown operator '%s'", $__operator));
-          }
           $__completions = $this->_filterCompletions($__completions, $__symbol);
         } elseif(preg_match('/[$]([[:alpha:]_]*[[:alnum:]_]*)$/',
-                            $__input, $__match_data)) {
-          /* Complete a variable name */
+                            $__input, $__match_data, PREG_OFFSET_CAPTURE)) {
+          /* Complete variable name */
+          list($__start, $__end) = $this->_matchBounds($__match_data[1]);
           $__completions = $this->_filterCompletions(array_keys(get_defined_vars()),
-                                                   $match_data[1]);
-        } elseif(preg_match("/\\[(['\"]?)([^\]]*)$/", $__input, $match_data,
-                            PREG_OFFSET_CAPTURE)) {
+                                                     $__match_data[1][0]);
+        } elseif(preg_match("/\\[[[:space:]]*(['\"]?)([^\]]*)$/",
+                            $__input, $__match_data, PREG_OFFSET_CAPTURE)) {
           /* Complete array (hash) index */
-          $__quote = $match_data[1][0];
-          $__symbol = $match_data[2][0];
-          list($__completion_base, $__is_bare) = $this->_getCompletionBase($__input, $match_data[0][1]);
+          $__quote = $__match_data[1][0];
+          $__symbol = $__match_data[2][0];
+          list($__start, $__end) = $this->_matchBounds($__match_data[2]);
+          list($__completion_base, $__is_bare) = $this->_getCompletionBase($__input, $__match_data[0][1]);
           if($__is_bare)
             $__result = NULL;
           else
             $__result = eval("return $__completion_base;");
           $__completions = $this->_filterCompletions(array_keys($__result),
-                                                   $__symbol);
+                                                     $__symbol);
           if(!$__quote) {
             foreach($__completions as &$str) {
               $str = sprintf("'%s']", str_replace("'", "\\'", $str));
             }
           }
-        } elseif(preg_match("/[[:alpha:]_][[:alnum:]_]*$/", $__input, $match_data)) {
+        } elseif(preg_match("/\\\\?((?:[[:alpha:]_]+[[:alnum:]_]*)(?:\\\\([[:alpha:]_]+[[:alnum:]_]*))*\\\\?)$/",
+                            $__input, $__match_data, PREG_OFFSET_CAPTURE)) {
           /* Complete function, class or defined constant */
-          $__completions = $this->_filterCompletions($this->_bareSymbols(), $match_data[0]);
+          list($__start, $__end) = $this->_matchBounds($__match_data[1]);
+          $__completions = $this->_filterCompletions($this->_bareSymbols(), $__match_data[1][0]);
         } else {
           $__completions = array();
         }
-        $__serialized = json_encode($__completions);
+        $__serialized = json_encode(array('start' => $__start,
+                                          'end' => $__end,
+                                          'completions' => $__completions));
         $__response = self::RESPONSE
           . pack('N', strlen($__serialized))
           . $__serialized;
@@ -329,35 +326,68 @@ class EvalWorker {
    * constant array index or a property lookup.
    */
   function _getCompletionBase ($line, $end) {
-    static $ident = "[a-zA-Z_][a-zA-Z0-9_]*";
-    static $number = "\\d+";
-    static $string1 = '"(?:[^"\\\\]|\\\\.)*"';
-    static $string2 = "'(?:[^'\\\\]|\\\\.)*'";
-    static $constant = NULL;
-    if(!$constant) $constant = "(?:{$number}|{$string1}|{$string2})";
+    /* Construct static regexps on first call */
+    static $rxMemberOrIndex, $rxVariable, $rxQualifiedName;
+    if(!$rxMemberOrIndex) {
+      $identifier = "[a-zA-Z_][a-zA-Z0-9_]*";
+      $number = "\\d+";
+      $singleString = '"(?:[^"\\\\]|\\\\.)*"';
+      $doubleString = "'(?:[^'\\\\]|\\\\.)*'";
 
-    $start = $end;
+      /* A variable with $ sigil */
+      $variable = "[$]{$identifier}";
+
+      /* A possibly-namespace-qualified bare name */
+      $qualifiedName = "\\\\?{$identifier}(?:\\\\{$identifier})*";
+
+      /* A class or interface constant */
+      $classConstant = "{$qualifiedName}::{$identifier}";
+
+      /* A constant: string literal, number, bare name, or class constant */
+      $constant = "(?:{$number}|{$identifier}|{$classConstant}|{$singleString}|{$doubleString})";
+
+      /* A constant array index: [ ... ] */
+      $index = "\\[[[:space:]]*{$constant}[[:space:]]*\\]";
+
+      /* A property access: ->xyz, ->$xyz, ::xyz, or ::$xyz */
+      $member = "(->|::)[[:space:]]*[$]?{$identifier}";
+
+      /* Either a property access or an index */
+      $memberOrIndex = "(?:(?:{$member})|(?:{$index}))";
+      
+      /* Static values including string-end assertion and PCRE delimiters */
+      $rxMemberOrIndex = "/{$memberOrIndex}$/";
+      $rxVariable = "/{$variable}$/";
+      $rxQualifiedName = "/{$qualifiedName}$/";
+    }
+
+    $start = $end = strlen(rtrim(substr($line, 0, $end)));
     while(TRUE) {
-      $substr = substr($line, 0, $start);
-      if(preg_match('/(->[$]?|::[$])' . $ident . '$/', $substr, $match)
-         || preg_match('/\[' . $constant . '\]$/', $substr, $match)) {
-        /* Matched either:
-         * - an array index: ['str'], ["str"] or [123]
-         * - property access: ->member or ->$member_name
-         * - or a static property access ::$member */
+      /* Ignore any whitespace at string end */
+      $substr = rtrim(substr($line, 0, $start));
+      $start = strlen($substr);
+
+      if(preg_match($rxMemberOrIndex, $substr, $match)) {
+        /* Matched a dereference or an array index.  Walk back and try
+         * to match more. */ 
         $start -= strlen($match[0]);
-      } elseif(preg_match('/[$]' . $ident . '$/', $substr, $match)) {
-        /* Matched a variable $var, which should be the beginning of
-         * the expression. */
+      } elseif(preg_match($rxVariable, $substr, $match)) {
+        /* Matched a variable $var at the beginning of the expression. */
         $start -= strlen($match[0]);
         return array(substr($line, $start, $end - $start), FALSE);
-      } elseif(preg_match("/\\\\?{$ident}(?:\\\\{$ident})*$/", $substr, $match)) {
+      } elseif(preg_match($rxQualifiedName, $substr, $match)) {
+        /* Matched a bare name at the beginning of the expression. */
+
+        /* If this is the entirety of the expression, it should be
+         * passed unchanged to the reflection methods, not
+         * evaluated. */
         $is_bare = $start == $end;
+
         $start -= strlen($match[0]);
         return array(substr($line, $start, $end - $start), $is_bare);
       } else {
-        /* Something else: assume we don't want to evaluate it for
-         * tab-completion.
+        /* Found something else.  Assume we don't want to evaluate it
+         * for tab-completion.
          */
         return FALSE;
       }
@@ -368,13 +398,22 @@ class EvalWorker {
    * Filter possible completions by prefix
    */
   function _filterCompletions($candidates, $prefix) {
+    if(strlen($prefix) == 0) return $candidates;
     $completions = array();
     foreach($candidates as $candidate) {
-      if(strpos($candidate, $prefix) == 0) {
+      if(strpos($candidate, $prefix) === 0) {
         $completions[] = $candidate;
-      }
+      } 
     }
     return $completions;
+  }
+
+  /**
+   * Convert match data for one group from PREG_OFFSET_CAPTURE into an
+   * array containing start and end positions
+   */
+  private function _matchBounds($data) {
+    return array($data[1], $data[1] + strlen($data[0]));
   }
 
   /**
@@ -382,6 +421,9 @@ class EvalWorker {
    * and functions.
    */
   function _bareSymbols() {
+    static $special = array('function', 'class', 'require', 'require_once',
+                            'include', 'include_once', 'echo', 'print',
+                            'unset', 'empty'); /* others? */
     $constants = array_keys(get_defined_constants());
     $classes = get_declared_classes();
     $interfaces = get_declared_interfaces();
@@ -391,7 +433,7 @@ class EvalWorker {
         $functions[] = $name . "(";
       }
     }
-    return array_merge($constants, $classes, $interfaces, $functions);
+    return array_merge($special, $constants, $classes, $interfaces, $functions);
   }
 
   /**
@@ -403,12 +445,12 @@ class EvalWorker {
     if(!is_object($obj)) return array();
     try {
       $refl = new \ReflectionObject($obj);
-      $methods = $refl->getMethods(/* \ReflectionMethod::IS_PUBLIC */);
+      $methods = $refl->getMethods();
       foreach ($methods as $method) {
         $return[] = $method->name . '(';
       }
 
-      $properties = $refl->getProperties(/* \ReflectionProperty::IS_PUBLIC */);
+      $properties = $refl->getProperties();
       foreach ($properties as $property) {
         $return[] = $property->name;
       }
@@ -427,26 +469,20 @@ class EvalWorker {
   function _staticMembers($obj) {
     try {
       $refl = new \ReflectionClass($obj);
+
       $constants = array_keys($refl->getConstants());
+
       $methods = array();
       foreach ($refl->getMethods(\ReflectionMethod::IS_STATIC) as $method) {
         $methods[] = $method->name . '(';
       }
-      return array_merge($methods, $constants);
-    } catch(\ReflectionException $e) {
-      return array();
-    }
-  }
 
-  /**
-   * Return static variables for an object
-   *
-   * These appear after the :: operator, preceded by a $ sigil.
-   */
-  function _staticProperties($obj) {
-    try {
-      $refl = new \ReflectionClass($obj);
-      return array_keys($refl->getStaticProperties());
+      $properties = array();
+      foreach($refl->getStaticProperties() as $property => $value) {
+        $properties[] = '$' . $property;
+      }
+
+      return array_merge($constants, $methods, $properties);
     } catch(\ReflectionException $e) {
       return array();
     }
