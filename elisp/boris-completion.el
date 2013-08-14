@@ -106,7 +106,7 @@
 (defun boris-completion-at-point ()
   (let* ((line (buffer-substring-no-properties (point-at-bol) (point-at-eol)))
          (response (boris-call `((operation . complete) (line . ,line)))))
-    (when response
+    (when (and response (gethash "completions" response))
       (list
        (+ (point-at-bol) (gethash "start" response))
        (+ (point-at-bol) (gethash "end" response))
