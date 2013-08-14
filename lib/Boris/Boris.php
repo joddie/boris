@@ -16,6 +16,7 @@ class Boris {
   private $_startHooks = array();
   private $_failureHooks = array();
   private $_inspector;
+  private $_port = NULL;
 
   /**
    * Create a new REPL, which consists of an evaluation worker and a readline client.
@@ -132,6 +133,13 @@ class Boris {
   }
 
   /**
+   * Set up to listen on a port
+   */
+  public function listenOn($port) {
+    $this->_port = $port;
+  }
+
+  /**
    * Start the REPL (display the readline prompt).
    *
    * This method never returns.
@@ -163,7 +171,7 @@ class Boris {
       }
 
       fclose($pipes[1]);
-      $worker = new EvalWorker($pipes[0]);
+      $worker = new EvalWorker($pipes[0], $this->_port);
       $worker->setLocal($this->_exports);
       $worker->setStartHooks($this->_startHooks);
       $worker->setFailureHooks($this->_failureHooks);

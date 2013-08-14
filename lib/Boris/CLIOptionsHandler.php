@@ -14,7 +14,7 @@ class CLIOptionsHandler {
    * @param Boris $boris
    */
   public function handle($boris) {
-    $args = getopt('hvr:', array('help', 'version', 'require:'));
+    $args = getopt('hvr:l::', array('help', 'version', 'require:', 'listen::'));
 
     foreach ($args as $option => $value) {
       switch ($option) {
@@ -41,6 +41,19 @@ class CLIOptionsHandler {
         case 'v':
         case 'version':
           $this->_handleVersion();
+        break;
+
+        /*
+         * Setup listening socket
+         */
+        case 'l':
+        case 'listen':
+          if($value === FALSE) $value = 8015;
+          if(!is_numeric($value)) {
+            fprintf(STDERR, "-l or --listen requires a numeric port number (default 8015)");
+            die(1);
+          }
+          $boris->listenOn($value);
         break;
       }
     }

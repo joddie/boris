@@ -15,11 +15,9 @@ class EvalWorker {
   const READY  = "\3";
   const RESPONSE = "\4";
 
-  /* Request opcodes sent by the ReadlineClient to EvalWorker */
-  const EVALUATE  = "\0";
-  const COMPLETE = "\1";
-
   private $_socket;
+  private $_server_socket;
+  private $_clients = array();
   private $_exports = array();
   private $_startHooks = array();
   private $_failureHooks = array();
@@ -34,10 +32,19 @@ class EvalWorker {
    *
    * @param resource $socket
    */
-  public function __construct($socket) {
+  public function __construct($socket, $port, $headless) {
     $this->_socket    = $socket;
     $this->_inspector = new DumpInspector();
     stream_set_blocking($socket, 0);
+
+    if(!empty($port)) {
+      $this->_server_socket = stream_socket_server("tcp://127.0.0.1:$port", $errno, $errstr);
+      if(!$this->_server_socket) {
+        print "Error starting server on port $port: '$errstr' ($errno)\n";
+      } else {
+        print "Listening on port $port.\n";
+      }
+    }
   }
 
   /**
@@ -88,11 +95,8 @@ class EvalWorker {
    */
   public function start() {
     $__scope = $this->_runHooks($this->_startHooks);
-    extract($__scope);
-
     $this->_write($this->_socket, self::READY);
 
-    /* Note the naming of the local variables due to shared scope with the user here */
     for (;;) {
       declare(ticks = 1);
       // don't exit on ctrl-c
@@ -100,133 +104,28 @@ class EvalWorker {
 
       $this->_cancelled = false;
 
-      $__input = $this->_read($this->_socket);
+      list($input, $client) = $this->_read($this->_socket);
 
-      if ($__input === null) {
+      if ($input === null) {
         continue;
       }
 
-      /* Dispatch on opcode in first byte */
-      switch ($__input[0]) {
-      case self::EVALUATE:
+      switch ($input->operation) {
+      case 'evaluate':
         /* Expression evaluation */
-        $__input = substr($__input, 1);
-
-        $__response = self::DONE;
-
-        $this->_ppid = posix_getpid();
-        $this->_pid  = pcntl_fork();
-
-        if ($this->_pid < 0) {
-          throw new \RuntimeException('Failed to fork child labourer');
-        } elseif ($this->_pid > 0) {
-          // kill the child on ctrl-c
-          pcntl_signal(SIGINT, array($this, 'cancelOperation'), true);
-          pcntl_waitpid($this->_pid, $__status);
-
-          if (!$this->_cancelled && $__status != (self::ABNORMAL_EXIT << 8)) {
-            $__response = self::EXITED;
-          } else {
-            $this->_runHooks($this->_failureHooks);
-            $__response = self::FAILED;
-          }
-        } else {
-          // user exception handlers normally cause a clean exit, so Boris will exit too
-          if (!$this->_exceptionHandler =
-              set_exception_handler(array($this, 'delegateExceptionHandler'))) {
-            restore_exception_handler();
-          }
-
-          // undo ctrl-c signal handling ready for user code execution
-          pcntl_signal(SIGINT, SIG_DFL, true);
-          $__pid = posix_getpid();
-
-          $__result = eval($__input);
-
-          if (posix_getpid() != $__pid) {
-            // whatever the user entered caused a forked child
-            // (totally valid, but we don't want that child to loop and wait for input)
-            exit(0);
-          }
-
-          if (preg_match('/\s*return\b/i', $__input)) {
-            fwrite(STDOUT, sprintf(" → %s\n", $this->_inspector->inspect($__result)));
-          }
-          $this->_expungeOldWorker();
-        }
+        $__response = $this->_doEval($input->statement, $__scope);
         break;
 
-      case self::COMPLETE:
-        $__input = substr($__input, 1);
-        if(preg_match("/(->|::)[[:space:]]*([$]?[[:alpha:]_]*[[:alnum:]_]*)$/",
-                      $__input, $__match_data, PREG_OFFSET_CAPTURE)) {
-          /* Complete one of the following, depending on the
-           * dereferencing operator:
-           *
-           * an object property or method '->xyz_...',
-           * an static method or constant '::xyz...',
-           * or a static property '::$xyz...'
-           */
-          $__operator = $__match_data[1][0];
-          $__symbol = $__match_data[2][0];
-          list($__start, $__end) = $this->_matchBounds($__match_data[2]);
-          list($__completion_base, $__is_bare) = $this->_getCompletionBase($__input, $__match_data[0][1]);
-          if($__is_bare)
-            $__result = $__completion_base;
-          else
-            $__result = eval("return $__completion_base;");
-          if($__operator == '->')
-            $__completions = $this->_objectMembers($__result);
-          else
-            $__completions = $this->_staticMembers($__result);
-          $__completions = $this->_filterCompletions($__completions, $__symbol);
-        } elseif(preg_match('/[$]([[:alpha:]_]*[[:alnum:]_]*)$/',
-                            $__input, $__match_data, PREG_OFFSET_CAPTURE)) {
-          /* Complete variable name */
-          list($__start, $__end) = $this->_matchBounds($__match_data[1]);
-          $__completions = $this->_filterCompletions(array_keys(get_defined_vars()),
-                                                     $__match_data[1][0]);
-        } elseif(preg_match("/\\[[[:space:]]*(['\"]?)([^\]]*)$/",
-                            $__input, $__match_data, PREG_OFFSET_CAPTURE)) {
-          /* Complete array (hash) index */
-          $__quote = $__match_data[1][0];
-          $__symbol = $__match_data[2][0];
-          list($__start, $__end) = $this->_matchBounds($__match_data[2]);
-          list($__completion_base, $__is_bare) = $this->_getCompletionBase($__input, $__match_data[0][1]);
-          if($__is_bare)
-            $__result = NULL;
-          else
-            $__result = eval("return $__completion_base;");
-          $__completions = $this->_filterCompletions(array_keys($__result),
-                                                     $__symbol);
-          if(!$__quote) {
-            foreach($__completions as &$str) {
-              $str = sprintf("'%s']", str_replace("'", "\\'", $str));
-            }
-          }
-        } elseif(preg_match("/\\\\?((?:[[:alpha:]_]+[[:alnum:]_]*)(?:\\\\([[:alpha:]_]+[[:alnum:]_]*))*\\\\?)$/",
-                            $__input, $__match_data, PREG_OFFSET_CAPTURE)) {
-          /* Complete function, class or defined constant */
-          list($__start, $__end) = $this->_matchBounds($__match_data[1]);
-          $__completions = $this->_filterCompletions($this->_bareSymbols(), $__match_data[1][0]);
-        } else {
-          $__completions = array();
-        }
-        $__serialized = json_encode(array('start' => $__start,
-                                          'end' => $__end,
-                                          'completions' => $__completions));
-        $__response = self::RESPONSE
-          . pack('N', strlen($__serialized))
-          . $__serialized;
-        unset($__serialized, $__completions);
+      case 'complete':
+        $__response = $this->_doComplete($input->line, $__scope);
         break;
 
       default:
-        throw new \RuntimeException(sprintf("Bad request code 0x%x", $__input[0]));
+        throw new \RuntimeException(sprintf("Bad operation '%s'", $input->operation));
         $__response = self::DONE;
       }
 
-      $this->_write($this->_socket, $__response);
+      $this->_write($client, $__response);
       
       if ($__response == self::EXITED) {
         exit(0);
@@ -278,6 +177,122 @@ class EvalWorker {
     return get_defined_vars();
   }
 
+  function _doEval($__input, &$__scope) {
+    $__response = self::DONE;
+
+    $this->_ppid = posix_getpid();
+    $this->_pid  = pcntl_fork();
+
+    if ($this->_pid < 0) {
+      throw new \RuntimeException('Failed to fork child labourer');
+    } elseif ($this->_pid > 0) {
+      // kill the child on ctrl-c
+      pcntl_signal(SIGINT, array($this, 'cancelOperation'), true);
+      pcntl_waitpid($this->_pid, $__status);
+
+      if (!$this->_cancelled && $__status != (self::ABNORMAL_EXIT << 8)) {
+        $__response = self::EXITED;
+      } else {
+        $this->_runHooks($this->_failureHooks);
+        $__response = self::FAILED;
+      }
+    } else {
+      // user exception handlers normally cause a clean exit, so Boris will exit too
+      if (!$this->_exceptionHandler =
+          set_exception_handler(array($this, 'delegateExceptionHandler'))) {
+        restore_exception_handler();
+      }
+
+      // undo ctrl-c signal handling ready for user code execution
+      pcntl_signal(SIGINT, SIG_DFL, true);
+      $__pid = posix_getpid();
+
+      $__result = $this->_evalInScope($__input, $__scope);
+
+      if (posix_getpid() != $__pid) {
+        // whatever the user entered caused a forked child
+        // (totally valid, but we don't want that child to loop and wait for input)
+        exit(0);
+      }
+
+      if (preg_match('/\s*return\b/i', $__input)) {
+        fwrite(STDOUT, sprintf(" → %s\n", $this->_inspector->inspect($__result)));
+      }
+      $this->_expungeOldWorker();
+    }
+    return $__response;
+  }
+
+  private function _doComplete($input, $scope) {
+    if(preg_match("/(->|::)[[:space:]]*([$]?[[:alpha:]_]*[[:alnum:]_]*)$/",
+                  $input, $matches, PREG_OFFSET_CAPTURE)) {
+      /* Complete one of the following, depending on the
+       * dereferencing operator:
+       *
+       * an object property or method '->xyz_...',
+       * an static method or constant '::xyz...',
+       * or a static property '::$xyz...'
+       */
+      $operator = $matches[1][0];
+      list($start, $end, $symbol) = $this->_matchBounds($matches[2]);
+      $obj = $this->_getCompletionObject($input, $matches[0][1], $scope);
+      if($operator == '->')
+        $candidates = $this->_objectMembers($obj);
+      else
+        $candidates = $this->_staticMembers($obj);
+      $completions = $this->_filterCompletions($candidates, $symbol);
+    } elseif(preg_match('/[$]([[:alpha:]_]*[[:alnum:]_]*)$/',
+                        $input, $matches, PREG_OFFSET_CAPTURE)) {
+      /* Complete variable name */
+      list($start, $end, $symbol) = $this->_matchBounds($matches[1]);
+      $completions = $this->_filterCompletions(array_keys($scope), $symbol);
+    } elseif(preg_match("/\\[[[:space:]]*(['\"]?)([^\]]*)$/",
+                        $input, $matches, PREG_OFFSET_CAPTURE)) {
+      /* Complete array (hash) index */
+      $quote = $matches[1][0];
+      list($start, $end, $symbol) = $this->_matchBounds($matches[2]);
+      $obj = $this->_getCompletionObject($input, $matches[0][1], $scope);
+      if(!is_array($obj)) {
+        $completions = array();
+      } else {
+        $completions = $this->_filterCompletions(array_keys($obj), $symbol);
+        if(!$quote) {
+          foreach($completions as &$str) {
+            $str = sprintf("'%s']", str_replace("'", "\\'", $str));
+          }
+        }
+      }
+    } elseif(preg_match("/new[[:space:]]+\\\\?((?:[[:alpha:]_]*[[:alnum:]_]*)(?:\\\\([[:alpha:]_]+[[:alnum:]_]*))*\\\\?)$/",
+                        $input, $matches, PREG_OFFSET_CAPTURE)) {
+      /* Complete "new ..." with a class name */
+      list($start, $end, $symbol) = $this->_matchBounds($matches[1]);
+      $completions = $this->_filterCompletions(get_declared_classes(), $symbol);
+      foreach($completions as &$completion) $completion .= '(';
+    } elseif(preg_match("/\\\\?((?:[[:alpha:]_]+[[:alnum:]_]*)(?:\\\\([[:alpha:]_]+[[:alnum:]_]*))*\\\\?)$/",
+                        $input, $matches, PREG_OFFSET_CAPTURE)) {
+      /* Complete function, class, interface, or constant */
+      list($start, $end, $symbol) = $this->_matchBounds($matches[1]);
+      $completions = $this->_filterCompletions($this->_bareSymbols(), $symbol);
+    } else {
+      /* Something else we don't know how to complete. */
+      $completions = array();
+    }
+    $serialized = json_encode(array('start' => $start,
+                                    'end' => $end,
+                                    'completions' => $completions));
+    return self::RESPONSE . pack('N', strlen($serialized)) . $serialized;
+  }
+
+  private function _evalInScope($__boris_code, &$__boris_scope) {
+    extract($__boris_scope);
+    $__boris_result = eval($__boris_code);
+    $__boris_scope = array_diff_key(get_defined_vars(), array(
+      '__boris_code' => 1,
+      '__boris_scope' => 1,
+      '__boris_result' => 1));
+    return $__boris_result;
+  }
+
   private function _expungeOldWorker() {
     posix_kill($this->_ppid, SIGTERM);
     pcntl_signal_dispatch();
@@ -297,16 +312,52 @@ class EvalWorker {
 
   private function _read($socket)
   {
-    $read = array($socket);
-    $write = null;
-    $except = array($socket);
+    $sockets = $this->_clients;
+    $sockets[] = $socket;
+    if($this->_server_socket)
+      $sockets[] = $this->_server_socket;
+
+    $write = NULL;
+    $read = $except = $sockets;
 
     if (stream_select($read, $write, $except, 10) > 0) {
       if ($read) {
-        return stream_get_contents($read[0]);
+        foreach ($read as $reader) {
+          if($reader === $this->_server_socket) {
+            $client = stream_socket_accept($this->_server_socket);
+            $this->_clients[] = $client;
+          } else {
+            $length_packed = fread($reader, 4);
+            if(!strlen($length_packed)) {
+              $this->_clients = array_diff($this->_clients, array($reader));
+            } else {
+              $unpacked = unpack('N', $length_packed);
+              $length = $unpacked[1];
+              /* FIXME: This really has to be in a loop and use
+               * temporary buffers, because the whole input may not
+               * arrive at once. */
+              $serialized = fread($reader, $length); /* stream_get_contents($reader); */
+              $unserialized = json_decode($serialized);
+              return array($unserialized, $reader);
+            }
+          }
+        }
       } else if ($except) {
         throw new \UnexpectedValueException("Socket error: closed");
       }
+    }
+  }
+
+  /**
+   * Given an incomplete line of code, return either a live object or
+   * a name to pass to reflection methods for member completion.
+   */
+  private function _getCompletionObject($line, $end, $scope) {
+    list($expr, $is_bare) = $this->_getCompletionBase($line, $end);
+    if($is_bare) {
+      return $expr;
+    } else {
+      return $this->_evalInScope("return $expr;", $scope);
     }
   }
 
@@ -319,7 +370,7 @@ class EvalWorker {
    * then the portion of the line which needs evaluation is
    *   $arr['index'][123]->member
    *   
-   * Other completion code (main loop) determines the incomplete
+   * Other completion code in _doComplete matches the incomplete
    * portion at the end of the line ("->x_" in the example above).
    * This function works by scanning backward from the beginning of
    * that fragment, accepting anything that looks like either a
@@ -378,11 +429,10 @@ class EvalWorker {
       } elseif(preg_match($rxQualifiedName, $substr, $match)) {
         /* Matched a bare name at the beginning of the expression. */
 
-        /* If this is the entirety of the expression, it should be
-         * passed unchanged to the reflection methods, not
-         * evaluated. */
+        /* If this bare name is the entire 'expression', it's a class
+         * or interface name which should be passed as a string to the
+         * reflection methods, not evaluated. */
         $is_bare = $start == $end;
-
         $start -= strlen($match[0]);
         return array(substr($line, $start, $end - $start), $is_bare);
       } else {
@@ -410,10 +460,10 @@ class EvalWorker {
 
   /**
    * Convert match data for one group from PREG_OFFSET_CAPTURE into an
-   * array containing start and end positions
+   * array containing start position, end position and matched text.
    */
   private function _matchBounds($data) {
-    return array($data[1], $data[1] + strlen($data[0]));
+    return array($data[1], $data[1] + strlen($data[0]), $data[0]);
   }
 
   /**

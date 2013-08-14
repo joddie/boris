@@ -86,11 +86,8 @@ class ReadlineClient {
 
         $buf = '';
         foreach ($statements as $stmt) {
-            if (false === $written = fwrite($this->_socket,
-                                            EvalWorker::EVALUATE . $stmt)) {
-            throw new \RuntimeException('Socket error: failed to write data');
-          }
-
+          $written = $this->_writeMessage(array('operation' => 'evaluate',
+                                                'statement' => $stmt));
           if ($written > 0) {
             $status = fread($this->_socket, 1);
             if ($status == EvalWorker::EXITED) {
@@ -129,7 +126,8 @@ class ReadlineClient {
     $line = substr($rl_info['line_buffer'], 0, $rl_info['point']);
 
     /* Call the EvalWorker to perform completion */
-    $this->_write($this->_socket, EvalWorker::COMPLETE . $line);
+    $this->_writeMessage(array('operation' => 'complete',
+                               'line' => $line));
     $response = $this->_read_unserialize();
     list($start, $end, $completions) = array($response->start, $response->end,
                                              $response->completions);
@@ -151,6 +149,12 @@ class ReadlineClient {
     return $completions;
   }
 
+  private function _writeMessage($msg) {
+    $serialized = json_encode($msg);
+    $frame = pack('N', strlen($serialized)) . $serialized;
+    return $this->_write($this->_socket, $frame);
+  }
+
   /* TODO: refactor me */
   private function _write($socket, $data) {
     $total = strlen($data);
@@ -162,6 +166,7 @@ class ReadlineClient {
                   $written, $total));
       }
     }
+    fflush($socket);
     return $written;
   }
 
