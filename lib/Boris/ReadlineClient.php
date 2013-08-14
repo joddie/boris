@@ -34,7 +34,12 @@ class ReadlineClient {
    */
   public function start($prompt, $historyFile) {
     readline_read_history($historyFile);
-    readline_completion_function(array($this, 'completion_function'));
+    $rl_info = readline_info();
+    if ($rl_info['library_version'] == 'EditLine wrapper') {
+      print "Boris tab completion disabled (requires PHP compiled with GNU readline, not libedit).";
+    } else {
+      readline_completion_function(array($this, 'completion_function'));
+    }
 
     declare(ticks = 1);
     pcntl_signal(SIGCHLD, SIG_IGN);
@@ -119,76 +124,70 @@ class ReadlineClient {
    * variables in the REPL scope.
    */
   public function completion_function($word) {
-      $rl_info = readline_info();
-      if ($rl_info['library_version'] == 'EditLine wrapper') {
-          print "\n\nTab completion requires PHP compiled with GNU readline, not libedit.\n\n";
-          return array();
+    /* Get the entire line of text entered so far */
+    $rl_info = readline_info();
+    $line = substr($rl_info['line_buffer'], 0, $rl_info['point']);
+
+    /* Call the EvalWorker to perform completion */
+    $this->_write($this->_socket, EvalWorker::COMPLETE . $line);
+    $response = $this->_read_unserialize();
+    list($start, $end, $completions) = array($response->start, $response->end,
+                                             $response->completions);
+
+    /* PHP's readline extension is not very configurable and tends
+     * to pick the wrong boundaries for the symbol to complete.  Fix
+     * up the returned completions accordingly. */
+    $rl_start = $rl_info['point'] - strlen($word);
+    $rl_end = $rl_info['point'];
+    if($start < $rl_start) {
+      foreach($completions as &$c) {
+        $c = substr($c, $rl_start - $start);
       }
-      $line = substr($rl_info['line_buffer'], 0, $rl_info['point']);
-
-      /* print("\ncompleting=$word\nprefix=$prefix\n"); */
-      /* Call the EvalWorker to perform completion */
-      $this->_write($this->_socket, EvalWorker::COMPLETE . $line);
-      $response = $this->_read_unserialize();
-      list($start, $end, $completions) = array($response->start, $response->end,
-                                               $response->completions);
-
-      $rl_start = $rl_info['point'] - strlen($word);
-      $rl_end = $rl_info['point'];
-
-      /* print("\nrl bounds=$rl_start .. $rl_end, word=$word\n"); */
-      /* print("new bounds=$start .. $end\n"); */
-      /* print_r($completions); */
-      if($start < $rl_start) {
-          foreach($completions as &$c) {
-              $c = substr($c, $rl_start - $start);
-          }
-      } elseif($start > $rl_start) {
-          foreach($completions as &$c) {
-              $c = substr($line, $rl_start, $start - $rl_start) . $c;
-          }
+    } elseif($start > $rl_start) {
+      foreach($completions as &$c) {
+        $c = substr($line, $rl_start, $start - $rl_start) . $c;
       }
-      /* print_r($completions); */
-      return $completions;
+    }
+    return $completions;
   }
 
   /* TODO: refactor me */
   private function _write($socket, $data) {
-      $total = strlen($data);
-      for ($written = 0; $written < $total; $written += $fwrite) {
-          $fwrite = fwrite($socket, substr($data, $written));
-          if ($fwrite === false) {
-              throw new \RuntimeException(
-                  sprintf('Socket error: wrote only %d of %d bytes.',
-                          $written, $total));
-          }
+    $total = strlen($data);
+    for ($written = 0; $written < $total; $written += $fwrite) {
+      $fwrite = fwrite($socket, substr($data, $written));
+      if ($fwrite === false) {
+        throw new \RuntimeException(
+          sprintf('Socket error: wrote only %d of %d bytes.',
+                  $written, $total));
       }
-      return $written;
+    }
+    return $written;
   }
 
   private function _read($socket, $bytes) {
-      for($read = ''; strlen($read) < $bytes; $read .= $fread) {
-          $fread = fread($socket, $bytes - strlen($read));
-          if(0 === $fread) {
-              throw new \RuntimeException('Socket closed during read.');
-          }
+    for($read = ''; strlen($read) < $bytes; $read .= $fread) {
+      $fread = fread($socket, $bytes - strlen($read));
+      if(0 === $fread) {
+        throw new \RuntimeException('Socket closed during read.');
       }
-      return $read;
+    }
+    return $read;
   }
 
   private function _read_unserialize() {
-      /* Get response: expected to be one-byte opcode,
-       * EvalWorker::RESPONSE, four bytes giving length of message,
-       * and serialized data */
-      $status = $this->_read($this->_socket, 1);
-      if ($status !== EvalWorker::RESPONSE) {
-          throw new \RuntimeException(sprintf('Bad response: 0x%x',
-                                              ord($status)));
-      }
-      $length_packed = $this->_read($this->_socket, 4);
-      $length_unpacked = unpack('N', $length_packed);
-      $length = $length_unpacked[1];
-      $serialized = $this->_read($this->_socket, $length);
-      return json_decode($serialized);
+    /* Get response: expected to be one-byte opcode,
+     * EvalWorker::RESPONSE, four bytes giving length of message,
+     * and serialized data */
+    $status = $this->_read($this->_socket, 1);
+    if ($status !== EvalWorker::RESPONSE) {
+      throw new \RuntimeException(sprintf('Bad response: 0x%x',
+                                          ord($status)));
+    }
+    $length_packed = $this->_read($this->_socket, 4);
+    $length_unpacked = unpack('N', $length_packed);
+    $length = $length_unpacked[1];
+    $serialized = $this->_read($this->_socket, $length);
+    return json_decode($serialized);
   }
 }
