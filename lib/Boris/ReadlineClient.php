@@ -34,6 +34,7 @@ class ReadlineClient {
    */
   public function start($prompt, $historyFile) {
     readline_read_history($historyFile);
+    readline_completion_function(array($this, 'completion_function'));
 
     declare(ticks = 1);
     pcntl_signal(SIGCHLD, SIG_IGN);
@@ -80,7 +81,8 @@ class ReadlineClient {
 
         $buf = '';
         foreach ($statements as $stmt) {
-          if (false === $written = fwrite($this->_socket, $stmt)) {
+            if (false === $written = fwrite($this->_socket,
+                                            EvalWorker::EVALUATE . $stmt)) {
             throw new \RuntimeException('Socket error: failed to write data');
           }
 
@@ -105,5 +107,80 @@ class ReadlineClient {
   public function clear() {
     // FIXME: I'd love to have this send \r to readline so it puts the user on a blank line
     $this->_clear = true;
+
+  }
+
+
+  /**
+   * Callback to perform readline completion.
+   *
+   * Sends a message over the socket to the EvalWorker requesting a
+   * list of completions, in order to complete on functions &
+   * variables in the REPL scope.
+   */
+  public function completion_function($word) {
+      $rl_info = readline_info();
+      if ($rl_info['library_version'] == 'EditLine wrapper') {
+          print "\n\nTab completion requires PHP compiled with GNU readline, not libedit.\n\n";
+          return array();
+      }
+      $line = substr($rl_info['line_buffer'], 0, $rl_info['point']);
+      
+      /* HACK. Ugh. */
+      if(FALSE !== $pos = strpos($word, '['))
+          $prefix = substr($word, 0, $pos + 1);
+      elseif(FALSE !== $pos = strpos($word, '::'))
+          $prefix = substr($word, 0, $pos + 2);
+      else
+          $prefix = '';
+
+      /* print("\ncompleting=$word\nprefix=$prefix\n"); */
+      /* Call the EvalWorker to perform completion */
+      $this->_write($this->_socket, EvalWorker::COMPLETE . $line);
+      $completions = $this->_read_unserialize();
+
+      /* HACK */
+      if($prefix) {
+          $completions = array_map(function($str) use ($prefix) {
+              return $prefix . $str; }, $completions);
+      }
+      return $completions;
+  }
+
+  /* TODO: refactor me */
+  private function _write($socket, $data) {
+      $total = strlen($data);
+      for ($written = 0; $written < $total; $written += $fwrite) {
+          $fwrite = fwrite($socket, substr($data, $written));
+          if ($fwrite === false) {
+              throw new \RuntimeException(
+                  sprintf('Socket error: wrote only %d of %d bytes.',
+                          $written, $total));
+          }
+      }
+      return $written;
+  }
+
+  private function _read($socket, $bytes) {
+      for($read = ''; strlen($read) < $bytes; $read .= $fread) {
+          $fread = fread($socket, $bytes - strlen($read));
+      }
+      return $read;
+  }
+
+  private function _read_unserialize() {
+      /* Get response: expected to be one-byte opcode,
+       * EvalWorker::RESPONSE, four bytes giving length of message,
+       * and serialized data */
+      $status = $this->_read($this->_socket, 1);
+      if ($status !== EvalWorker::RESPONSE) {
+          throw new \RuntimeException(sprintf('Bad response: 0x%x',
+                                              ord($status)));
+      }
+      $length_packed = $this->_read($this->_socket, 4);
+      $length_unpacked = unpack('N', $length_packed);
+      $length = $length_unpacked[1];
+      $serialized = $this->_read($this->_socket, $length);
+      return unserialize($serialized);
   }
 }
