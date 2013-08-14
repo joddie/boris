@@ -217,7 +217,7 @@ class EvalWorker {
         } else {
           $__completions = array();
         }
-        $__serialized = serialize($__completions);
+        $__serialized = json_encode($__completions);
         $__response = self::RESPONSE
           . pack('N', strlen($__serialized))
           . $__serialized;
@@ -399,16 +399,16 @@ class EvalWorker {
    *
    * These are the symbols which can appear after the -> operator.
    */
-  function _objectMembers($obj)
-  {
+  function _objectMembers($obj) {
+    if(!is_object($obj)) return array();
     try {
       $refl = new \ReflectionObject($obj);
-      $methods = $refl->getMethods(\ReflectionMethod::IS_PUBLIC);
+      $methods = $refl->getMethods(/* \ReflectionMethod::IS_PUBLIC */);
       foreach ($methods as $method) {
         $return[] = $method->name . '(';
       }
 
-      $properties = $refl->getProperties(\ReflectionProperty::IS_PUBLIC);
+      $properties = $refl->getProperties(/* \ReflectionProperty::IS_PUBLIC */);
       foreach ($properties as $property) {
         $return[] = $property->name;
       }

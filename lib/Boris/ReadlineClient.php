@@ -181,6 +181,6 @@ class ReadlineClient {
       $length_unpacked = unpack('N', $length_packed);
       $length = $length_unpacked[1];
       $serialized = $this->_read($this->_socket, $length);
-      return unserialize($serialized);
+      return json_decode($serialized);
   }
 }
