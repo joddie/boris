@@ -3,3 +3,5 @@
 boris.phar
 /TAGS
 /tests/_*
+/.dir-locals.el
+/elisp/boris-completion.elc

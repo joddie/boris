@@ -115,13 +115,16 @@
 
 ;; hack -- redefine `php-boris' to pass the 'listen' command line flag
 (eval-after-load 'php-boris 
-  '(defun php-boris ()
-    "Run boris REPL (Hacked version to demo completion code)."
-    (interactive)
-    (setq php-boris-prompt-re
-          (format php-boris-prompt-re-format php-boris-prompt php-boris-prompt))
-    (switch-to-buffer-other-window
-     (apply 'make-comint php-boris-process-name php-boris-command nil
-            `("-l" "-e" ,(format php-boris-code (window-width) php-boris-prompt))))
-    (php-boris-mode)
-    (setq completion-at-point-functions '(boris-completion-at-point))))
+  '(progn
+    (defun php-boris ()
+      "Run boris REPL (Hacked version to demo completion code)."
+      (interactive)
+      (setq php-boris-prompt-re
+            (format php-boris-prompt-re-format php-boris-prompt php-boris-prompt))
+      (switch-to-buffer-other-window
+       (apply 'make-comint php-boris-process-name php-boris-command nil
+              `("-l" "-e" ,(format php-boris-code (window-width) php-boris-prompt))))
+      (php-boris-mode))
+    (add-hook 'php-boris-mode-hook
+     (lambda ()
+       (setq completion-at-point-functions '(boris-completion-at-point))))))
