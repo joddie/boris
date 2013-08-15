@@ -120,6 +120,10 @@ class EvalWorker {
         $__response = $this->_doComplete($input->line, $__scope);
         break;
 
+      case 'hint':
+        $__response = $this->_doHint($input->what, $__scope);
+        break;
+
       default:
         throw new \RuntimeException(sprintf("Bad operation '%s'", $input->operation));
         $__response = self::DONE;
@@ -278,10 +282,46 @@ class EvalWorker {
       $start = $end = NULL;
       $completions = array();
     }
-    $serialized = json_encode(array('start' => $start,
-                                    'end' => $end,
-                                    'completions' => $completions));
+    return $this->_packResponse(array('start' => $start,
+                                      'end' => $end,
+                                      'completions' => $completions));
+  }
+
+  private function _packResponse($response) {
+    $serialized = json_encode($response);
     return self::RESPONSE . pack('N', strlen($serialized)) . $serialized;
+  }
+
+  private function _doHint($what, $scope) {
+    try {
+      $refl = new \ReflectionFunction($what);
+      $params = $refl->getParameters();
+      $required = array_splice($params, 0, $refl->getNumberOfRequiredParameters());
+      $arg_string = $this->_describeParams($required);
+      if(count($params)) {
+        $arg_string .= sprintf('[, %s ]', $this->_describeParams($params));
+      }
+      $response = array('hint' =>
+                        sprintf('%s%s ( %s )',
+                                $refl->returnsReference() ? '&' : '',
+                                $refl->name,
+                                $arg_string));
+    } catch(\ReflectionException $e) {
+      $response = array('hint' => NULL);
+    }
+    return $this->_packResponse($response);
+  }
+
+  private function _describeParams($params) {
+    return implode(', ', array_map(function($param) {
+      $base = sprintf('%s$%s',
+                      $param->isPassedByReference() ? '&' : '',
+                      $param->name);
+      if($param->isDefaultValueAvailable())
+        return $base . " = " . $param->getDefaultValue();
+      else
+        return $base;
+    }, $params));
   }
 
   private function _evalInScope($__boris_code, &$__boris_scope) {

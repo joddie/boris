@@ -121,6 +121,20 @@
        (+ (point-at-bol) (gethash "end" response))
        (gethash "completions" response)))))
 
+;;;###autoload
+(defun boris-eldoc-function ()
+  (save-excursion
+    (skip-syntax-backward "-")
+    (or (boris-get-eldoc (thing-at-point 'symbol))
+        (progn
+          (search-backward "(" (point-at-bol) t)
+          (skip-syntax-backward "-")
+          (boris-get-eldoc (thing-at-point 'symbol))))))
+
+(defun boris-get-eldoc (symbol)
+  (let ((response (boris-call `((operation . hint) (what . ,symbol)))))
+    (and response (gethash "hint" response))))
+
 
 ;; hack -- redefine `php-boris' to pass the 'listen' command line flag
 
@@ -144,6 +158,10 @@
      (lambda ()
        (when (< emacs-major-version 24)
          (setq comint-dynamic-complete-functions '(completion-at-point)))
-       (setq completion-at-point-functions '(boris-completion-at-point))))))
+       (setq completion-at-point-functions '(boris-completion-at-point))
+       (setq eldoc-documentation-function 'boris-eldoc-function)
+       (eldoc-add-command 'completion-at-point)
+       (eldoc-add-command 'comint-dynamic-complete)
+       (eldoc-mode +1)))))
 
 ;;; boris-completion.el ends here
