@@ -25,14 +25,10 @@
 
 ;;; Code:
 
+(require 'php-mode)
 (require 'php-boris)
 (require 'bindat)
 (require 'json)
-
-
-(defvar boris-connection nil)
-
-(defvar boris-point-at-bol nil)
 
 (defvar boris-process nil)
 (defvar boris-buffer nil)
@@ -177,7 +173,6 @@
 
 ;; hack -- redefine `php-boris' to pass the 'listen' command line flag
 
-;;;###autoload
 ;;;###autoload
 (eval-after-load 'php-boris 
   '(progn

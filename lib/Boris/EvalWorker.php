@@ -303,7 +303,7 @@ class EvalWorker {
       $required = array_splice($params, 0, $refl->getNumberOfRequiredParameters());
       $arg_string = $this->_describeParams($required);
       if(count($params)) {
-        $arg_string .= sprintf('[, %s ]', $this->_describeParams($params));
+        $arg_string .= sprintf(' [, %s ]', $this->_describeParams($params));
       }
       $response = array('hint' =>
                         sprintf('%s%s ( %s )',
@@ -322,7 +322,7 @@ class EvalWorker {
                       $param->isPassedByReference() ? '&' : '',
                       $param->name);
       if($param->isDefaultValueAvailable())
-        return $base . " = " . $param->getDefaultValue();
+        return $base . " = " . var_export($param->getDefaultValue(), TRUE);
       else
         return $base;
     }, $params));
