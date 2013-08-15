@@ -99,8 +99,8 @@
                  (json-array-type 'list)
                  (response
                   (json-read-from-string (bindat-get-field unpacked :data)))
-                (read-chars
-                 (bindat-length boris-response-format unpacked)))
+                 (read-chars
+                  (bindat-length boris-response-format unpacked)))
             (delete-region boris-marker (+ boris-marker read-chars))
             (setq boris-response response)))))))
 
@@ -123,21 +123,61 @@
 
 ;;;###autoload
 (defun boris-eldoc-function ()
+  (or (boris-get-eldoc (boris-symbol-at-point))
+      (save-excursion
+        (search-backward "(" (point-at-bol) t)
+        (boris-get-eldoc (boris-symbol-at-point)))))
+
+(defvar boris-namespace-syntax-table
+  (let ((table (copy-syntax-table php-mode-syntax-table)))
+    (modify-syntax-entry ?\\ "_" table)
+    table))
+
+(defun boris-symbol-at-point ()
   (save-excursion
     (skip-syntax-backward "-")
-    (or (boris-get-eldoc (thing-at-point 'symbol))
-        (progn
-          (search-backward "(" (point-at-bol) t)
-          (skip-syntax-backward "-")
-          (boris-get-eldoc (thing-at-point 'symbol))))))
+    (with-syntax-table boris-namespace-syntax-table
+      (thing-at-point 'symbol))))
 
 (defun boris-get-eldoc (symbol)
-  (let ((response (boris-call `((operation . hint) (what . ,symbol)))))
-    (and response (gethash "hint" response))))
+  (when symbol
+    (let ((response (boris-call `((operation . hint) (what . ,symbol)))))
+      (and response (gethash "hint" response)))))
 
+(defun boris-get-documentation ()
+  (interactive)
+  (let* ((symbol (boris-symbol-at-point))
+         (docs (boris-call `((operation . documentation)
+                             (what . ,symbol)))))
+    (when docs
+      (with-help-window "*boris help*"
+        (princ docs))
+      (with-current-buffer "*boris help*"
+        (let ((inhibit-read-only t)
+              (read-only-mode nil))
+          (goto-char (point-min))
+          (while (re-search-forward
+                  "@@ \\(.*\\) \\([0-9]+\\)[[:space:]]*-[[:space:]]*[0-9]+" nil t)
+            (let* ((start (match-beginning 0))
+                   (end (match-end 0))
+                   (file-name (match-string 1))
+                   (line-number (string-to-number (match-string 2))))
+              (make-text-button
+               start end
+               'boris-file-name file-name
+               'boris-line-number line-number
+               'action 'boris-xref
+               'follow-link t))))))))
+
+(defun boris-xref (button)
+  (let ((file-name (button-get button 'boris-file-name))
+        (line-number (button-get button 'boris-line-number)))
+    (pop-to-buffer (find-file file-name))
+    (goto-line line-number)))
 
 ;; hack -- redefine `php-boris' to pass the 'listen' command line flag
 
+;;;###autoload
 ;;;###autoload
 (eval-after-load 'php-boris 
   '(progn
@@ -145,15 +185,17 @@
       "command-line arguments for boris"
       :group 'php-boris
       :type '(repeat string))
+    
     (defun php-boris ()
       "Run boris REPL (Hacked version to demo completion code)."
       (interactive)
       (setq php-boris-prompt-re
             (format php-boris-prompt-re-format php-boris-prompt php-boris-prompt))
-      (switch-to-buffer-other-window
+      (pop-to-buffer
        (apply 'make-comint php-boris-process-name php-boris-command nil
               php-boris-args))
       (php-boris-mode))
+
     (add-hook 'php-boris-mode-hook
      (lambda ()
        (when (< emacs-major-version 24)
@@ -162,6 +204,19 @@
        (setq eldoc-documentation-function 'boris-eldoc-function)
        (eldoc-add-command 'completion-at-point)
        (eldoc-add-command 'comint-dynamic-complete)
-       (eldoc-mode +1)))))
+       (eldoc-mode +1)))
+
+           (define-key php-boris-mode-map (kbd "C-c C-d") 'boris-get-documentation)
+    (define-key php-boris-mode-map (kbd "C-c C-z") 'php-boris)
+
+    (eval-after-load 'php-mode
+      '(define-key php-mode-map (kbd "C-c C-z")
+        (lambda ()
+          (interactive)
+          (if (and (buffer-live-p "*boris-repl*")
+                   (get-buffer-process "*boris-repl*")
+                   (process-live-p (get-buffer-process "*boris-repl*")))
+              (pop-to-buffer "*boris-repl*")
+            (php-boris)))))))
 
 ;;; boris-completion.el ends here

@@ -124,6 +124,10 @@ class EvalWorker {
         $__response = $this->_doHint($input->what, $__scope);
         break;
 
+      case 'documentation':
+        $__response = $this->_doDocumentation($input->what, $__scope);
+        break;
+
       default:
         throw new \RuntimeException(sprintf("Bad operation '%s'", $input->operation));
         $__response = self::DONE;
@@ -322,6 +326,24 @@ class EvalWorker {
       else
         return $base;
     }, $params));
+  }
+
+  private function _doDocumentation($what, $scope) {
+    $response = NULL;
+    try {
+      if(class_exists($what)) {
+        $refl = new \ReflectionClass($what);
+      } elseif(function_exists($what)) {
+        $refl = new \ReflectionFunction($what);
+      }
+      if($refl)
+        $response = $refl->__toString();
+      else
+        $response = NULL;
+    } catch(\ReflectionException $e) {
+      $response = NULL;
+    }
+    return $this->_packResponse($response);
   }
 
   private function _evalInScope($__boris_code, &$__boris_scope) {
