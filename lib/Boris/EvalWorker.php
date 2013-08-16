@@ -26,6 +26,7 @@ class EvalWorker {
   private $_cancelled;
   private $_inspector;
   private $_exceptionHandler;
+  private $_completionParser;
 
   /**
    * Create a new worker using the given socket for communication.
@@ -45,6 +46,8 @@ class EvalWorker {
         print "Listening on port $port.\n";
       }
     }
+
+    $this->_completionParser = new CompletionParser();
   }
 
   /**
@@ -117,15 +120,18 @@ class EvalWorker {
         break;
 
       case 'complete':
-        $__response = $this->_doComplete($input->line, $__scope);
+        $return = $this->_doComplete($input->line, $__scope);
+        $__response = $this->_packResponse($return);
         break;
 
       case 'hint':
-        $__response = $this->_doHint($input->what, $__scope);
+        $return = $this->_doHint($input->line, $__scope);
+        $__response = $this->_packResponse($return);
         break;
 
       case 'documentation':
-        $__response = $this->_doDocumentation($input->what, $__scope);
+        $return = $this->_doDocumentation($input->line, $__scope);
+        $__response = $this->_packResponse($return);
         break;
 
       default:
@@ -232,63 +238,76 @@ class EvalWorker {
   }
 
   private function _doComplete($input, $scope) {
-    if(preg_match("/(->|::)[[:space:]]*([$]?[[:alpha:]_]*[[:alnum:]_]*)$/",
-                  $input, $matches, PREG_OFFSET_CAPTURE)) {
-      /* Complete one of the following, depending on the
-       * dereferencing operator:
-       *
-       * an object property or method '->xyz_...',
-       * an static method or constant '::xyz...',
-       * or a static property '::$xyz...'
-       */
-      $operator = $matches[1][0];
-      list($start, $end, $symbol) = $this->_matchBounds($matches[2]);
-      $obj = $this->_getCompletionObject($input, $matches[0][1], $scope);
-      if($operator == '->')
-        $candidates = $this->_objectMembers($obj);
-      else
-        $candidates = $this->_staticMembers($obj);
-      $completions = $this->_filterCompletions($candidates, $symbol);
-    } elseif(preg_match('/[$]([[:alpha:]_]*[[:alnum:]_]*)$/',
-                        $input, $matches, PREG_OFFSET_CAPTURE)) {
-      /* Complete variable name */
-      list($start, $end, $symbol) = $this->_matchBounds($matches[1]);
-      $completions = $this->_filterCompletions(array_keys($scope), $symbol);
-    } elseif(preg_match("/\\[[[:space:]]*(['\"]?)([^\]]*)$/",
-                        $input, $matches, PREG_OFFSET_CAPTURE)) {
-      /* Complete array (hash) index */
-      $quote = $matches[1][0];
-      list($start, $end, $symbol) = $this->_matchBounds($matches[2]);
-      $obj = $this->_getCompletionObject($input, $matches[0][1], $scope);
-      if(!is_array($obj)) {
+    $info = $this->_completionParser->getCompletionInfo($input);
+    if($info === NULL) return NULL;
+
+    switch($info->how) {
+      /* FIXME: Constants and properties are case sensitive. Functions
+       * and methods (normal or static) are not. */
+    case CompletionParser::COMPLETE_MEMBER:
+      $context = $this->_getCompletionContext($info, $scope);
+      $candidates = $this->_objectMembers($context);
+      $completions = $this->_filterCompletions($candidates, $info->symbol);
+      break;
+
+    case CompletionParser::COMPLETE_STATIC:
+      $context = $this->_getCompletionContext($info, $scope);
+      $candidates = $this->_staticMembers($context);
+      $completions = $this->_filterCompletions($candidates, $info->symbol);
+      break;
+      
+    case CompletionParser::COMPLETE_VARIABLE:
+      $candidates = array_map(function($name) { return '$' . $name; },
+                              array_keys($scope));
+      $completions = $this->_filterCompletions($candidates, $info->symbol);
+
+      break;
+
+    case CompletionParser::COMPLETE_INDEX:
+      $context = $this->_getCompletionContext($info, $scope);
+      if(!is_array($context)) {
         $completions = array();
       } else {
-        $completions = $this->_filterCompletions(array_keys($obj), $symbol);
-        if(!$quote) {
-          foreach($completions as &$str) {
-            $str = sprintf("'%s']", str_replace("'", "\\'", $str));
-          }
-        }
+        $completions = $this->_filterCompletions(array_keys($context),
+                                                 $info->symbol);
       }
-    } elseif(preg_match("/new[[:space:]]+\\\\?((?:[[:alpha:]_]*[[:alnum:]_]*)(?:\\\\([[:alpha:]_]+[[:alnum:]_]*))*\\\\?)$/",
-                        $input, $matches, PREG_OFFSET_CAPTURE)) {
-      /* Complete "new ..." with a class name */
-      list($start, $end, $symbol) = $this->_matchBounds($matches[1]);
-      $completions = $this->_filterCompletions(get_declared_classes(), $symbol);
-      foreach($completions as &$completion) $completion .= '(';
-    } elseif(preg_match("/\\\\?((?:[[:alpha:]_]+[[:alnum:]_]*)(?:\\\\([[:alpha:]_]+[[:alnum:]_]*))*\\\\?)$/",
-                        $input, $matches, PREG_OFFSET_CAPTURE)) {
-      /* Complete function, class, interface, or constant */
-      list($start, $end, $symbol) = $this->_matchBounds($matches[1]);
-      $completions = $this->_filterCompletions($this->_bareSymbols(), $symbol);
-    } else {
-      /* Something else we don't know how to complete. */
-      $start = $end = NULL;
-      $completions = array();
+      break;
+
+    case CompletionParser::COMPLETE_CLASS:
+      $this->_stripInitialSlash($info);
+      $completions = $this->_filterCompletions(get_declared_classes(),
+                                               $info->symbol, TRUE);
+      $completions = array_map(function($name) { return $name . '('; },
+                               $completions);
+      break;
+
+    case CompletionParser::COMPLETE_SYMBOL:
+      $this->_stripInitialSlash($info);
+      /* Constants are case sensitive, but other names are not. */
+      $constants = $this->_filterCompletions(array_keys(get_defined_constants()),
+                                             $info->symbol, FALSE);
+      $symbols = $this->_filterCompletions($this->_bareSymbols(),
+                                           $info->symbol, TRUE);
+      $completions = array_merge($constants, $symbols);
+      break;
+
+    default:
+      throw new \RuntimeException(sprintf(
+        "Unexpected value %s returned from getCompletionInfo",
+        $info->how));
     }
-    return $this->_packResponse(array('start' => $start,
-                                      'end' => $end,
-                                      'completions' => $completions));
+
+    return array('start' => $info->start,
+                 'end' => $info->end,
+                 'completions' => $completions);
+  }
+
+  /* Handle an annoying special case with absolutely qualified names */
+  private function _stripInitialSlash(&$info) {
+    if($info->symbol[0] == '\\') {
+      $info->start += 1;
+      $info->symbol = substr($info->symbol, 1);
+    }
   }
 
   private function _packResponse($response) {
@@ -296,24 +315,73 @@ class EvalWorker {
     return self::RESPONSE . pack('N', strlen($serialized)) . $serialized;
   }
 
-  private function _doHint($what, $scope) {
+  private function _getReflectionObject($line, $scope) {
+    $info = $this->_completionParser->getDocInfo($line);
+    if(!$info) return NULL; 
+    
     try {
-      $refl = new \ReflectionFunction($what);
-      $params = $refl->getParameters();
-      $required = array_splice($params, 0, $refl->getNumberOfRequiredParameters());
-      $arg_string = $this->_describeParams($required);
-      if(count($params)) {
-        $arg_string .= sprintf(' [, %s ]', $this->_describeParams($params));
+      switch($info[0]) {
+      case CompletionParser::FUNCTION_INFO:
+        return new \ReflectionFunction($info[1]);
+        break;
+
+      case CompletionParser::CLASS_INFO:
+        try {
+          return new \ReflectionMethod($info[1], '__construct');
+        } catch (\ReflectionException $e) {
+          return new \ReflectionMethod($info[1], $info[1]);
+        }
+        break;
+
+      case CompletionParser::METHOD_INFO:
+        list(, $base, $bare, $method) = $info;
+        if($bare) $obj = $base;
+        else $obj = $this->_evalInScope("return $base;", $scope);
+        return new \ReflectionMethod($obj, $method);
+        break;
+
+      default:
+        throw new \RuntimeException(
+          sprintf("Unexpected code %s from CompletionParser::getDocInfo",
+                  $info[0]));
       }
-      $response = array('hint' =>
-                        sprintf('%s%s ( %s )',
-                                $refl->returnsReference() ? '&' : '',
-                                $refl->name,
-                                $arg_string));
-    } catch(\ReflectionException $e) {
-      $response = array('hint' => NULL);
+    } catch (\ReflectionException $e) {
+      return NULL;
     }
-    return $this->_packResponse($response);
+  }
+
+  private function _doHint($line, $scope) {
+    $refl = $this->_getReflectionObject($line, $scope);
+    if(!$refl) return NULL;
+    try { 
+      return $this->_describeFunctionOrMethod($refl);
+    } catch(\ReflectionException $e) {
+      return NULL;
+    }
+  }
+
+  private function _doDocumentation($line, $scope) {
+    $refl = $this->_getReflectionObject($line, $scope);
+    if(!$refl) return NULL;
+    try { 
+      return $refl->__toString();
+    } catch(\ReflectionException $e) {
+      return NULL;
+    }
+  }
+
+  private function _describeFunctionOrMethod($refl) {
+    $params = $refl->getParameters();
+    $required = array_splice($params, 0, $refl->getNumberOfRequiredParameters());
+    $arg_string = $this->_describeParams($required);
+    if(count($params)) {
+      $arg_string .= sprintf(' [, %s ]', $this->_describeParams($params));
+    }
+    
+    return sprintf('%s%s ( %s )',
+                   $refl->returnsReference() ? '&' : '',
+                   ($refl->name == '__construct') ? $refl->getDeclaringClass()->name : $refl->name,
+                   $arg_string);
   }
 
   private function _describeParams($params) {
@@ -326,24 +394,6 @@ class EvalWorker {
       else
         return $base;
     }, $params));
-  }
-
-  private function _doDocumentation($what, $scope) {
-    $response = NULL;
-    try {
-      if(class_exists($what)) {
-        $refl = new \ReflectionClass($what);
-      } elseif(function_exists($what)) {
-        $refl = new \ReflectionFunction($what);
-      }
-      if($refl)
-        $response = $refl->__toString();
-      else
-        $response = NULL;
-    } catch(\ReflectionException $e) {
-      $response = NULL;
-    }
-    return $this->_packResponse($response);
   }
 
   private function _evalInScope($__boris_code, &$__boris_scope) {
@@ -390,16 +440,24 @@ class EvalWorker {
             $client = stream_socket_accept($this->_server_socket);
             $this->_clients[] = $client;
           } else {
-            $length_packed = fread($reader, 4);
+            $length_packed = stream_socket_recvfrom($reader, 4, STREAM_PEEK);
             if(!strlen($length_packed)) {
+              /* Client disconnected */
               $this->_clients = array_diff($this->_clients, array($reader));
+            } elseif(strlen($length_packed) < 4) {
+              /* Incomplete length header: leave it in the buffer for
+               * next time */
+              continue;
             } else {
               $unpacked = unpack('N', $length_packed);
-              $length = $unpacked[1];
-              /* FIXME: This really has to be in a loop and use
-               * temporary buffers, because the whole input may not
-               * arrive at once. */
-              $serialized = fread($reader, $length); /* stream_get_contents($reader); */
+              $length = 4 + $unpacked[1];
+              $message = stream_socket_recvfrom($reader, $length, STREAM_PEEK);
+              if(strlen($message) != $length) {
+                /* Incomplete message: leave it for next time */
+                continue;
+              }
+              stream_socket_recvfrom($reader, $length);
+              $serialized = substr($message, 4);
               $unserialized = json_decode($serialized);
               return array($unserialized, $reader);
             }
@@ -411,133 +469,58 @@ class EvalWorker {
     }
   }
 
-  /**
-   * Given an incomplete line of code, return either a live object or
-   * a name to pass to reflection methods for member completion.
-   */
-  private function _getCompletionObject($line, $end, $scope) {
-    list($expr, $is_bare) = $this->_getCompletionBase($line, $end);
-    if($is_bare) {
-      return $expr;
+/**
+ * Given the info returned from CompletionParser::getCompletionInfo,
+ * return either a bare name or a live object suitable for passing
+ * to the reflection methods for completion/documentation.
+ */
+  private function _getCompletionContext($info, $scope) {
+    if($info->is_bare) {
+      return $info->base;
     } else {
-      return $this->_evalInScope("return $expr;", $scope);
+      return $this->_evalInScope('return ' . $info->base . ';', $scope);
     }
   }
 
-  /**
-   * Get the portion of code which must be evaluated to perform
-   * tab-completion.
-   *
-   * Example: if the cursor is at the end of the following line:
-   *   printf("%d\n", $arr['index'][123]->member->x_
-   * then the portion of the line which needs evaluation is
-   *   $arr['index'][123]->member
-   *   
-   * Other completion code in _doComplete matches the incomplete
-   * portion at the end of the line ("->x_" in the example above).
-   * This function works by scanning backward from the beginning of
-   * that fragment, accepting anything that looks like either a
-   * constant array index or a property lookup.
-   */
-  function _getCompletionBase ($line, $end) {
-    /* Construct static regexps on first call */
-    static $rxMemberOrIndex, $rxVariable, $rxQualifiedName;
-    if(!$rxMemberOrIndex) {
-      $identifier = "[a-zA-Z_][a-zA-Z0-9_]*";
-      $number = "\\d+";
-      $singleString = '"(?:[^"\\\\]|\\\\.)*"';
-      $doubleString = "'(?:[^'\\\\]|\\\\.)*'";
-
-      /* A variable with $ sigil */
-      $variable = "[$]{$identifier}";
-
-      /* A possibly-namespace-qualified bare name */
-      $qualifiedName = "\\\\?{$identifier}(?:\\\\{$identifier})*";
-
-      /* A class or interface constant */
-      $classConstant = "{$qualifiedName}::{$identifier}";
-
-      /* A constant: string literal, number, bare name, or class constant */
-      $constant = "(?:{$number}|{$identifier}|{$classConstant}|{$singleString}|{$doubleString})";
-
-      /* A constant array index: [ ... ] */
-      $index = "\\[[[:space:]]*{$constant}[[:space:]]*\\]";
-
-      /* A property access: ->xyz, ->$xyz, ::xyz, or ::$xyz */
-      $member = "(->|::)[[:space:]]*[$]?{$identifier}";
-
-      /* Either a property access or an index */
-      $memberOrIndex = "(?:(?:{$member})|(?:{$index}))";
-      
-      /* Static values including string-end assertion and PCRE delimiters */
-      $rxMemberOrIndex = "/{$memberOrIndex}$/";
-      $rxVariable = "/{$variable}$/";
-      $rxQualifiedName = "/{$qualifiedName}$/";
-    }
-
-    $start = $end = strlen(rtrim(substr($line, 0, $end)));
-    while(TRUE) {
-      /* Ignore any whitespace at string end */
-      $substr = rtrim(substr($line, 0, $start));
-      $start = strlen($substr);
-
-      if(preg_match($rxMemberOrIndex, $substr, $match)) {
-        /* Matched a dereference or an array index.  Walk back and try
-         * to match more. */ 
-        $start -= strlen($match[0]);
-      } elseif(preg_match($rxVariable, $substr, $match)) {
-        /* Matched a variable $var at the beginning of the expression. */
-        $start -= strlen($match[0]);
-        return array(substr($line, $start, $end - $start), FALSE);
-      } elseif(preg_match($rxQualifiedName, $substr, $match)) {
-        /* Matched a bare name at the beginning of the expression. */
-
-        /* If this bare name is the entire 'expression', it's a class
-         * or interface name which should be passed as a string to the
-         * reflection methods, not evaluated. */
-        $is_bare = $start == $end;
-        $start -= strlen($match[0]);
-        return array(substr($line, $start, $end - $start), $is_bare);
-      } else {
-        /* Found something else.  Assume we don't want to evaluate it
-         * for tab-completion.
-         */
-        return FALSE;
+/**
+ * Filter completion candidates by prefix.
+ */
+  function _filterCompletions($candidates, $prefix, $case_fold = FALSE) {
+    if(strlen($prefix) == 0) return $candidates;
+    $filtered = array();
+    if($case_fold) {
+      $prefix_length = strlen($prefix);
+      foreach($candidates as $candidate) {
+        if (strpos(strtolower($candidate), strtolower($prefix)) === 0) {
+          $filtered[] = $prefix . substr($candidate, $prefix_length);
+        }
+      }
+    } else {
+      foreach($candidates as $candidate) {
+        if (strpos($candidate, $prefix) === 0) {
+          $filtered[] = $candidate;
+        }
       }
     }
+    return $filtered;
   }
 
-  /**
-   * Filter possible completions by prefix
-   */
-  function _filterCompletions($candidates, $prefix) {
-    if(strlen($prefix) == 0) return $candidates;
-    $completions = array();
-    foreach($candidates as $candidate) {
-      if(strpos($candidate, $prefix) === 0) {
-        $completions[] = $candidate;
-      } 
-    }
-    return $completions;
-  }
-
-  /**
-   * Convert match data for one group from PREG_OFFSET_CAPTURE into an
-   * array containing start position, end position and matched text.
-   */
+/**
+ * Convert match data for one group from PREG_OFFSET_CAPTURE into an
+ * array containing start position, end position and matched text.
+ */
   private function _matchBounds($data) {
     return array($data[1], $data[1] + strlen($data[0]), $data[0]);
   }
 
-  /**
-   * Return the names of all defined constants, classes, interfaces
-   * and functions.
-   */
+/**
+ * Return the names of all defined constants, classes, interfaces
+ * and functions.
+ */
   function _bareSymbols() {
     static $special = array('function', 'class', 'require', 'require_once',
                             'include', 'include_once', 'echo', 'print',
-                            'unset', 'empty'); /* others? */
-    $constants = array_keys(get_defined_constants());
+                            'unset', 'empty', 'list', 'array'); /* others? */
     $classes = get_declared_classes();
     $interfaces = get_declared_interfaces();
     $functions = array();
@@ -546,14 +529,14 @@ class EvalWorker {
         $functions[] = $name . "(";
       }
     }
-    return array_merge($special, $constants, $classes, $interfaces, $functions);
+    return array_merge($special, $classes, $interfaces, $functions);
   }
 
-  /**
-   * Return all properties and methods of an object.
-   *
-   * These are the symbols which can appear after the -> operator.
-   */
+/**
+ * Return all properties and methods of an object.
+ *
+ * These are the symbols which can appear after the -> operator.
+ */
   function _objectMembers($obj) {
     if(!is_object($obj)) return array();
     try {
@@ -574,11 +557,11 @@ class EvalWorker {
     }
   }
 
-  /**
-   * Return the static methods and constants of an object.
-   * 
-   * These are the symbols which can appear after the :: operator
-   */
+/**
+ * Return the static methods and constants of an object.
+ * 
+ * These are the symbols which can appear after the :: operator
+ */
   function _staticMembers($obj) {
     try {
       $refl = new \ReflectionClass($obj);
