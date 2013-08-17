@@ -125,7 +125,7 @@ class CompletionParser {
 
 
   /* private methods below */
- 
+
   /**
    * Provide a nicer interface to PHP's built-in tokenizer, by
    * transforming its values into objects with a standard set of
@@ -175,13 +175,6 @@ class CompletionParser {
                  $tokens[count($tokens) - 1]->end);
   }
 
-  private function tokensToText ($tokens) {
-    return array_map(function($token) {
-      return $token->text;
-    }, $tokens);
-  }
-
-
   /*
    * Token pattern-matching
    */
@@ -199,7 +192,7 @@ class CompletionParser {
     if($trailing_ok && $this->matchEnd($tokens, array(T_NS_SEPARATOR))) {
       array_unshift($match, array_pop($tokens));
     }
-      
+
     while(TRUE) {
       if($this->matchEnd($tokens, array(T_STRING))) {
         array_unshift($match, array_pop($tokens));
@@ -239,7 +232,7 @@ class CompletionParser {
    *   printf("%d\n", $arr['index'][123]->member->x_
    * then the portion of the line which needs evaluation is
    *   $arr['index'][123]->member
-   *   
+   *
    * The getCompletionInfo method takes care of matching and removing
    * portion at the end of the line ("->x_" in the example above).
    * This function works by scanning backward from just before that
@@ -272,7 +265,7 @@ class CompletionParser {
          * or interface name which should be passed as a string to the
          * reflection methods, not evaluated. */
         $is_bare = count($match) == 0;
-        $match = array_merge($part, $match); 
+        $match = array_merge($part, $match);
         break;
       }
       else {

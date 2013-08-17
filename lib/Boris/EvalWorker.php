@@ -26,7 +26,7 @@ class EvalWorker {
   private $_cancelled;
   private $_inspector;
   private $_exceptionHandler;
-  private $_completionParser;
+  private $_completer;
 
   /**
    * Create a new worker using the given socket for communication.
@@ -47,7 +47,7 @@ class EvalWorker {
       }
     }
 
-    $this->_completionParser = new CompletionParser();
+    $this->_completer = new Completer($this);
   }
 
   /**
@@ -120,17 +120,17 @@ class EvalWorker {
         break;
 
       case 'complete':
-        $return = $this->_doComplete($input->line, $__scope);
+        $return = $this->_completer->getCompletions($input->line, $__scope);
         $__response = $this->_packResponse($return);
         break;
 
       case 'hint':
-        $return = $this->_doHint($input->line, $__scope);
+        $return = $this->_completer->getHint($input->line, $__scope);
         $__response = $this->_packResponse($return);
         break;
 
       case 'documentation':
-        $return = $this->_doDocumentation($input->line, $__scope);
+        $return = $this->_completer->getDocumentation($input->line, $__scope);
         $__response = $this->_packResponse($return);
         break;
 
@@ -191,7 +191,7 @@ class EvalWorker {
     return get_defined_vars();
   }
 
-  function _doEval($__input, &$__scope) {
+  private function _doEval($__input, &$__scope) {
     $__response = self::DONE;
 
     $this->_ppid = posix_getpid();
@@ -237,166 +237,7 @@ class EvalWorker {
     return $__response;
   }
 
-  private function _doComplete($input, $scope) {
-    $info = $this->_completionParser->getCompletionInfo($input);
-    if($info === NULL) return NULL;
-
-    switch($info->how) {
-      /* FIXME: Constants and properties are case sensitive. Functions
-       * and methods (normal or static) are not. */
-    case CompletionParser::COMPLETE_MEMBER:
-      $context = $this->_getCompletionContext($info, $scope);
-      $candidates = $this->_objectMembers($context);
-      $completions = $this->_filterCompletions($candidates, $info->symbol);
-      break;
-
-    case CompletionParser::COMPLETE_STATIC:
-      $context = $this->_getCompletionContext($info, $scope);
-      $candidates = $this->_staticMembers($context);
-      $completions = $this->_filterCompletions($candidates, $info->symbol);
-      break;
-      
-    case CompletionParser::COMPLETE_VARIABLE:
-      $candidates = array_map(function($name) { return '$' . $name; },
-                              array_keys($scope));
-      $completions = $this->_filterCompletions($candidates, $info->symbol);
-
-      break;
-
-    case CompletionParser::COMPLETE_INDEX:
-      $context = $this->_getCompletionContext($info, $scope);
-      if(!is_array($context)) {
-        $completions = array();
-      } else {
-        $completions = $this->_filterCompletions(array_keys($context),
-                                                 $info->symbol);
-      }
-      break;
-
-    case CompletionParser::COMPLETE_CLASS:
-      $this->_stripInitialSlash($info);
-      $completions = $this->_filterCompletions(get_declared_classes(),
-                                               $info->symbol, TRUE);
-      $completions = array_map(function($name) { return $name . '('; },
-                               $completions);
-      break;
-
-    case CompletionParser::COMPLETE_SYMBOL:
-      $this->_stripInitialSlash($info);
-      /* Constants are case sensitive, but other names are not. */
-      $constants = $this->_filterCompletions(array_keys(get_defined_constants()),
-                                             $info->symbol, FALSE);
-      $symbols = $this->_filterCompletions($this->_bareSymbols(),
-                                           $info->symbol, TRUE);
-      $completions = array_merge($constants, $symbols);
-      break;
-
-    default:
-      throw new \RuntimeException(sprintf(
-        "Unexpected value %s returned from getCompletionInfo",
-        $info->how));
-    }
-
-    return array('start' => $info->start,
-                 'end' => $info->end,
-                 'completions' => $completions);
-  }
-
-  /* Handle an annoying special case with absolutely qualified names */
-  private function _stripInitialSlash(&$info) {
-    if($info->symbol[0] == '\\') {
-      $info->start += 1;
-      $info->symbol = substr($info->symbol, 1);
-    }
-  }
-
-  private function _packResponse($response) {
-    $serialized = json_encode($response);
-    return self::RESPONSE . pack('N', strlen($serialized)) . $serialized;
-  }
-
-  private function _getReflectionObject($line, $scope) {
-    $info = $this->_completionParser->getDocInfo($line);
-    if(!$info) return NULL; 
-    
-    try {
-      switch($info[0]) {
-      case CompletionParser::FUNCTION_INFO:
-        return new \ReflectionFunction($info[1]);
-        break;
-
-      case CompletionParser::CLASS_INFO:
-        try {
-          return new \ReflectionMethod($info[1], '__construct');
-        } catch (\ReflectionException $e) {
-          return new \ReflectionMethod($info[1], $info[1]);
-        }
-        break;
-
-      case CompletionParser::METHOD_INFO:
-        list(, $base, $bare, $method) = $info;
-        if($bare) $obj = $base;
-        else $obj = $this->_evalInScope("return $base;", $scope);
-        return new \ReflectionMethod($obj, $method);
-        break;
-
-      default:
-        throw new \RuntimeException(
-          sprintf("Unexpected code %s from CompletionParser::getDocInfo",
-                  $info[0]));
-      }
-    } catch (\ReflectionException $e) {
-      return NULL;
-    }
-  }
-
-  private function _doHint($line, $scope) {
-    $refl = $this->_getReflectionObject($line, $scope);
-    if(!$refl) return NULL;
-    try { 
-      return $this->_describeFunctionOrMethod($refl);
-    } catch(\ReflectionException $e) {
-      return NULL;
-    }
-  }
-
-  private function _doDocumentation($line, $scope) {
-    $refl = $this->_getReflectionObject($line, $scope);
-    if(!$refl) return NULL;
-    try { 
-      return $refl->__toString();
-    } catch(\ReflectionException $e) {
-      return NULL;
-    }
-  }
-
-  private function _describeFunctionOrMethod($refl) {
-    $params = $refl->getParameters();
-    $required = array_splice($params, 0, $refl->getNumberOfRequiredParameters());
-    $arg_string = $this->_describeParams($required);
-    if(count($params)) {
-      $arg_string .= sprintf(' [, %s ]', $this->_describeParams($params));
-    }
-    
-    return sprintf('%s%s ( %s )',
-                   $refl->returnsReference() ? '&' : '',
-                   ($refl->name == '__construct') ? $refl->getDeclaringClass()->name : $refl->name,
-                   $arg_string);
-  }
-
-  private function _describeParams($params) {
-    return implode(', ', array_map(function($param) {
-      $base = sprintf('%s$%s',
-                      $param->isPassedByReference() ? '&' : '',
-                      $param->name);
-      if($param->isDefaultValueAvailable())
-        return $base . " = " . var_export($param->getDefaultValue(), TRUE);
-      else
-        return $base;
-    }, $params));
-  }
-
-  private function _evalInScope($__boris_code, &$__boris_scope) {
+  public function _evalInScope($__boris_code, &$__boris_scope) {
     extract($__boris_scope);
     $__boris_result = eval($__boris_code);
     $__boris_scope = array_diff_key(get_defined_vars(), array(
@@ -421,6 +262,11 @@ class EvalWorker {
                   $written, $total));
       }
     }
+  }
+
+  private function _packResponse($response) {
+    $serialized = json_encode($response);
+    return self::RESPONSE . pack('N', strlen($serialized)) . $serialized;
   }
 
   private function _read($socket)
@@ -469,118 +315,4 @@ class EvalWorker {
     }
   }
 
-/**
- * Given the info returned from CompletionParser::getCompletionInfo,
- * return either a bare name or a live object suitable for passing
- * to the reflection methods for completion/documentation.
- */
-  private function _getCompletionContext($info, $scope) {
-    if($info->is_bare) {
-      return $info->base;
-    } else {
-      return $this->_evalInScope('return ' . $info->base . ';', $scope);
-    }
-  }
-
-/**
- * Filter completion candidates by prefix.
- */
-  function _filterCompletions($candidates, $prefix, $case_fold = FALSE) {
-    if(strlen($prefix) == 0) return $candidates;
-    $filtered = array();
-    if($case_fold) {
-      $prefix_length = strlen($prefix);
-      foreach($candidates as $candidate) {
-        if (strpos(strtolower($candidate), strtolower($prefix)) === 0) {
-          $filtered[] = $prefix . substr($candidate, $prefix_length);
-        }
-      }
-    } else {
-      foreach($candidates as $candidate) {
-        if (strpos($candidate, $prefix) === 0) {
-          $filtered[] = $candidate;
-        }
-      }
-    }
-    return $filtered;
-  }
-
-/**
- * Convert match data for one group from PREG_OFFSET_CAPTURE into an
- * array containing start position, end position and matched text.
- */
-  private function _matchBounds($data) {
-    return array($data[1], $data[1] + strlen($data[0]), $data[0]);
-  }
-
-/**
- * Return the names of all defined constants, classes, interfaces
- * and functions.
- */
-  function _bareSymbols() {
-    static $special = array('function', 'class', 'require', 'require_once',
-                            'include', 'include_once', 'echo', 'print',
-                            'unset', 'empty', 'list', 'array'); /* others? */
-    $classes = get_declared_classes();
-    $interfaces = get_declared_interfaces();
-    $functions = array();
-    foreach(get_defined_functions() as $type => $names) {
-      foreach($names as $name) {
-        $functions[] = $name . "(";
-      }
-    }
-    return array_merge($special, $classes, $interfaces, $functions);
-  }
-
-/**
- * Return all properties and methods of an object.
- *
- * These are the symbols which can appear after the -> operator.
- */
-  function _objectMembers($obj) {
-    if(!is_object($obj)) return array();
-    try {
-      $refl = new \ReflectionObject($obj);
-      $methods = $refl->getMethods();
-      foreach ($methods as $method) {
-        $return[] = $method->name . '(';
-      }
-
-      $properties = $refl->getProperties();
-      foreach ($properties as $property) {
-        $return[] = $property->name;
-      }
-
-      return $return;
-    } catch(\ReflectionException $e) {
-      return array();
-    }
-  }
-
-/**
- * Return the static methods and constants of an object.
- * 
- * These are the symbols which can appear after the :: operator
- */
-  function _staticMembers($obj) {
-    try {
-      $refl = new \ReflectionClass($obj);
-
-      $constants = array_keys($refl->getConstants());
-
-      $methods = array();
-      foreach ($refl->getMethods(\ReflectionMethod::IS_STATIC) as $method) {
-        $methods[] = $method->name . '(';
-      }
-
-      $properties = array();
-      foreach($refl->getStaticProperties() as $property => $value) {
-        $properties[] = '$' . $property;
-      }
-
-      return array_merge($constants, $methods, $properties);
-    } catch(\ReflectionException $e) {
-      return array();
-    }
-  }
 }
