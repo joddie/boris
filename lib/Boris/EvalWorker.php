@@ -4,6 +4,7 @@
 
 namespace Boris;
 
+
 /**
  * EvalWorker is responsible for evaluating PHP expressions in forked processes.
  */
@@ -255,7 +256,7 @@ class EvalWorker {
   private function _write($socket, $data) {
     $total = strlen($data);
     for ($written = 0; $written < $total; $written += $fwrite) {
-      $fwrite = fwrite($socket, substr($data, $written));
+      $fwrite = @fwrite($socket, substr($data, $written));
       if ($fwrite === false) {
         throw new \RuntimeException(
           sprintf('Socket error: wrote only %d of %d bytes.',

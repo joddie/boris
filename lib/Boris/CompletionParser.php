@@ -38,8 +38,7 @@ class CompletionParser {
       else $how = self::COMPLETE_STATIC;
       $end = strlen($input);
       return (object) array('how' => $how,
-                            'base' => $base,
-                            'is_bare' => $is_bare,
+                            'base' => $base, 'is_bare' => $is_bare,
                             'symbol' => '',
                             'start' => $end, 'end' => $end);
     }
@@ -48,7 +47,7 @@ class CompletionParser {
       list($base, $is_bare) = $this->getBaseTokens($tokens);
       if($is_bare) return NULL;
       return (object) array('how' => self::COMPLETE_MEMBER,
-                            'base' => $base,
+                            'base' => $base, 'is_bare' => FALSE,
                             'symbol' => $symbol->text,
                             'start' => $symbol->start, 'end' => $symbol->end);
     }

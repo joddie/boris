@@ -142,7 +142,7 @@ class Completer {
 
   /* Handle an annoying special case with absolutely qualified names */
   private function stripInitialSlash(&$info) {
-    if($info->symbol[0] == '\\') {
+    if(strlen($info->symbol) && $info->symbol[0] == '\\') {
       $info->start += 1;
       $info->symbol = substr($info->symbol, 1);
     }
