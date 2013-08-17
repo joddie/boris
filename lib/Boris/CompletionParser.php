@@ -24,7 +24,13 @@ class CompletionParser {
    */
   public function getCompletionInfo($input) {
     $tokens = $this->tokenize($input);
-    if (($match = $this->popMatch($tokens, array(T_OBJECT_OPERATOR)))
+    if(count($tokens) === 0) {
+      $end = strlen($input);
+      return (object) array('how' => self::COMPLETE_SYMBOL,
+                            'symbol' => '',
+                            'start' => $end, 'end' => $end);
+    }
+    elseif (($match = $this->popMatch($tokens, array(T_OBJECT_OPERATOR)))
         || ($match = $this->popMatch($tokens, array(T_DOUBLE_COLON)))) {
       $operator = $match[0];
       list($base, $is_bare) = $this->getBaseTokens($tokens);
