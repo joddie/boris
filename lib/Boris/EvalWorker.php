@@ -32,7 +32,7 @@ class EvalWorker {
    *
    * @param resource $socket
    */
-  public function __construct($socket, $port, $headless) {
+  public function __construct($socket, $port) {
     $this->_socket    = $socket;
     $this->_inspector = new DumpInspector();
     stream_set_blocking($socket, 0);
@@ -275,6 +275,7 @@ class EvalWorker {
       $completions = $this->_filterCompletions($this->_bareSymbols(), $symbol);
     } else {
       /* Something else we don't know how to complete. */
+      $start = $end = NULL;
       $completions = array();
     }
     $serialized = json_encode(array('start' => $start,

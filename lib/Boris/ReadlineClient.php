@@ -36,7 +36,7 @@ class ReadlineClient {
     readline_read_history($historyFile);
     $rl_info = readline_info();
     if ($rl_info['library_version'] == 'EditLine wrapper') {
-      print "Boris tab completion disabled (requires PHP compiled with GNU readline, not libedit).";
+      print "Boris tab completion disabled (requires PHP compiled with GNU readline, not libedit).\n";
     } else {
       readline_completion_function(array($this, 'completion_function'));
     }

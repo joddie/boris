@@ -1,6 +1,10 @@
-;; boris-completion.el -- context-sensitive completion hack for boris repl
+;;; boris-completion.el --- context-sensitive completion hack for boris repl
 
-;; Copyright (C) 2012-2013 joddie <jonxfield@gmail.com>
+;; Copyright (C) 2013 joddie <jonxfield@gmail.com>
+
+;; Author: joddie
+;; Version: 0.2
+;; Keywords: php, repl, boris
 
 ;; This file is NOT part of GNU Emacs.
 
@@ -17,6 +21,9 @@
 ;; You should have received a copy of the GNU General Public License
 ;; along with this program.  If not, see `http://www.gnu.org/licenses/'.
 
+;;; Commentary:
+
+;;; Code:
 
 (require 'php-boris)
 (require 'bindat)
@@ -42,22 +49,23 @@
     (:length long)
     (:data str (:length))))
 
+;;;###autoload
 (defun boris-connect ()
   (interactive)
-  (let ((progress (make-progress-reporter "Connecting to Boris on port 8015...")))
-    (when boris-process (delete-process boris-process))
-    (when boris-buffer (kill-buffer boris-buffer))
-    (setq boris-buffer (get-buffer-create "*boris connection*"))
-    (with-current-buffer boris-buffer (set-buffer-multibyte nil))
-    (setq boris-process
-          (open-network-stream
-           "boris" boris-buffer "127.0.0.1" 8015))
-    (set-process-coding-system boris-process 'raw-text 'raw-text)
-    (set-process-query-on-exit-flag boris-process nil)
-    (set-process-filter boris-process 'boris-filter)
-    (with-current-buffer boris-buffer
-      (setq boris-marker (copy-marker (point-min))))
-    (progress-reporter-done progress)))
+  (message "Connecting to Boris on port 8015...")
+  (when boris-process (delete-process boris-process))
+  (when boris-buffer (kill-buffer boris-buffer))
+  (setq boris-buffer (get-buffer-create " *boris connection*"))
+  (with-current-buffer boris-buffer (set-buffer-multibyte nil))
+  (setq boris-process
+        (open-network-stream
+         "boris" boris-buffer "127.0.0.1" 8015))
+  (set-process-coding-system boris-process 'binary 'binary)
+  (set-process-query-on-exit-flag boris-process nil)
+  (set-process-filter boris-process 'boris-filter)
+  (with-current-buffer boris-buffer
+    (setq boris-marker (copy-marker (point-min))))
+  (message "Connecting to Boris on port 8015... done."))
 
 (defun boris-call (data)
   (unless (and boris-process (process-live-p boris-process))
@@ -103,6 +111,7 @@
                  `((:length . ,len)
                    (:data . ,json)))))
 
+;;;###autoload
 (defun boris-completion-at-point ()
   (let* ((line (buffer-substring-no-properties (point-at-bol) (point-at-eol)))
          (response (boris-call `((operation . complete) (line . ,line)))))
@@ -114,8 +123,14 @@
 
 
 ;; hack -- redefine `php-boris' to pass the 'listen' command line flag
+
+;;;###autoload
 (eval-after-load 'php-boris 
   '(progn
+    (defcustom php-boris-args '("-l")
+      "command-line arguments for boris"
+      :group 'php-boris
+      :type '(repeat string))
     (defun php-boris ()
       "Run boris REPL (Hacked version to demo completion code)."
       (interactive)
@@ -123,8 +138,12 @@
             (format php-boris-prompt-re-format php-boris-prompt php-boris-prompt))
       (switch-to-buffer-other-window
        (apply 'make-comint php-boris-process-name php-boris-command nil
-              `("-l" "-e" ,(format php-boris-code (window-width) php-boris-prompt))))
+              php-boris-args))
       (php-boris-mode))
     (add-hook 'php-boris-mode-hook
      (lambda ()
+       (when (< emacs-major-version 24)
+         (setq comint-dynamic-complete-functions '(completion-at-point)))
        (setq completion-at-point-functions '(boris-completion-at-point))))))
+
+;;; boris-completion.el ends here
