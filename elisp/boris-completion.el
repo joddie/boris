@@ -3,7 +3,7 @@
 ;; Copyright (C) 2013 joddie <jonxfield@gmail.com>
 
 ;; Author: joddie
-;; Version: 0.9
+;; Version: 0.13
 ;; Keywords: php, repl, boris
 
 ;; This file is NOT part of GNU Emacs.
@@ -44,7 +44,6 @@
 (defvar boris-process nil)
 (defvar boris-buffer nil)
 
-(defvar boris-marker nil)
 (defvar boris-response nil)
 (defvar boris-response-flag nil)
 
@@ -85,8 +84,6 @@
   (set-process-coding-system boris-process 'binary 'binary)
   (set-process-query-on-exit-flag boris-process nil)
   (set-process-filter boris-process 'boris-filter)
-  (with-current-buffer boris-buffer
-    (setq boris-marker (copy-marker (point-min))))
   (message "Connecting to Boris on port 8015... done."))
 
 (defun boris-require-connection ()
@@ -106,6 +103,9 @@
     (warn "Boris response timeout."))
   boris-response)
 
+(defvar boris-response-code-regexp
+  (rx-to-string '(any 0 1 2 3 4)))
+
 (defun boris-filter (proc string)
   (when (buffer-live-p (process-buffer proc))
     (with-current-buffer (process-buffer proc)
@@ -117,10 +117,22 @@
           (set-marker (process-mark proc) (point)))
         (if moving (goto-char (process-mark proc))))
 
+      ;; Delete any left-over garbage
+      (when (> (point-max) (point-min))
+        (save-excursion
+          (goto-char (point-min))
+          (when (not (looking-at boris-response-code-regexp))
+            (search-forward-regexp boris-response-code-regexp nil t)
+            (let ((garbage
+                   (delete-and-extract-region
+                    (point-min) (match-beginning 0))))
+              (warn "Discarded partial message \"%s\" from Boris."
+                     garbage)))))
+
       (let ((unpacked
              (condition-case err
                  (bindat-unpack boris-response-format 
-                                (buffer-substring boris-marker (process-mark proc)))
+                                (buffer-substring (point-min) (process-mark proc)))
                (args-out-of-range nil))))
         (when unpacked
           (let* ((json-object-type 'hash-table)
@@ -129,7 +141,7 @@
                   (json-read-from-string (bindat-get-field unpacked :data)))
                  (read-chars
                   (bindat-length boris-response-format unpacked)))
-            (delete-region boris-marker (+ boris-marker read-chars))
+            (delete-region (point-min) (+ (point-min) read-chars))
             (setq boris-response response
                   boris-response-flag t)))))))
 
@@ -210,19 +222,20 @@
                           (get-process php-boris-process-name)))
         (php-boris))))
   (define-key php-mode-map (kbd "C-c d") 'boris-get-documentation)
-  (add-hook 'php-mode-hook
-            (lambda ()
-              (setq boris-original-php-eldoc-function
-                    eldoc-documentation-function)
-              (set (make-local-variable 'eldoc-documentation-function)
-                   'boris-eldoc-function)
-              (eldoc-mode +1)
-              (eldoc-add-command 'completion-at-point)
-              (set (make-local-variable 'completion-at-point-functions)
-                   '(boris-completion-at-point t))
-              ;; (add-hook 'completion-at-point-functions
-              ;;           'boris-completion-at-point nil t)
-              )))
+  (add-hook 'php-mode-hook 'boris-php-mode-hook))
+
+(defun boris-php-mode-hook ()
+  (setq boris-original-php-eldoc-function
+        eldoc-documentation-function)
+  (set (make-local-variable 'eldoc-documentation-function)
+       'boris-eldoc-function)
+  (eldoc-mode +1)
+  (eldoc-add-command 'completion-at-point)
+  (set (make-local-variable 'completion-at-point-functions)
+       '(boris-completion-at-point t))
+  ;; (add-hook 'completion-at-point-functions
+  ;;           'boris-completion-at-point nil t)
+  )
 
 ;;;###autoload
 (defun boris-setup-php-boris-mode ()
@@ -241,24 +254,39 @@
             php-boris-args))
     (php-boris-mode))
 
-  (add-hook 'php-boris-mode-hook
-            (lambda ()
-              (when (< emacs-major-version 24)
-                (setq comint-dynamic-complete-functions '(completion-at-point)))
-              (setq completion-at-point-functions '(boris-completion-at-point))
-              (setq eldoc-documentation-function 'boris-eldoc-function)
-              (eldoc-add-command 'completion-at-point)
-              (eldoc-add-command 'comint-dynamic-complete)
-              (eldoc-mode +1)))
-
+  (add-hook 'php-boris-mode-hook 'boris-php-boris-mode-hook)
+  
   (define-key php-boris-mode-map (kbd "C-c C-d") 'boris-get-documentation)
   (define-key php-boris-mode-map (kbd "C-c C-z") 'php-boris))
 
+(defun boris-php-boris-mode-hook ()
+    (when (< emacs-major-version 24)
+      (add-hook 'comint-dynamic-complete-functions 'completion-at-point
+                nil t))
+    (remove-hook 'comint-dynamic-complete-functions 'php-boris-complete-from-process t)
+    (set (make-local-variable 'completion-at-point-functions)
+         '(boris-completion-at-point))
+    (set (make-local-variable 'eldoc-documentation-function)
+         'boris-eldoc-function)
+    (eldoc-add-command 'completion-at-point)
+    (eldoc-add-command 'comint-dynamic-complete)
+    (eldoc-mode +1)
+    (compilation-shell-minor-mode +1))
+
+;;;###autoload
+(defun boris-setup-compilation-mode ()
+  (add-to-list 'compilation-error-regexp-alist-alist
+               '(boris-php-backtrace
+                 "^PHP.* \\(/[^:]+\\):\\([0-9]+\\)" 1 2 nil nil))
+  (add-to-list 'compilation-error-regexp-alist 'boris-php-backtrace))
 
 ;;;###autoload
 (eval-after-load 'php-boris '(boris-setup-php-boris-mode))
 
 ;;;###autoload
 (eval-after-load 'php-mode '(boris-setup-php-mode))
+
+;;;###autoload
+(eval-after-load 'compile '(boris-setup-compilation-mode))
 
 ;;; boris-completion.el ends here
