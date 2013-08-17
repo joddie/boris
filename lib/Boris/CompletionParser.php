@@ -78,6 +78,12 @@ class CompletionParser {
                             'symbol' => $symbol->text,
                             'start' => $symbol->start, 'end' => $symbol->end);
     }
+    elseif (($matches = $this->popMatch($tokens, array(T_NEW)))) {
+      $end = strlen($input);
+      return (object) array('how' => self::COMPLETE_CLASS,
+                            'symbol' => '',
+                            'start' => $end, 'end' => $end);
+    }
     elseif (($matches = $this->popQualifiedName($tokens, TRUE))) {
       if($new = $this->popMatch($tokens, array(T_NEW))) {
         $how = self::COMPLETE_CLASS;
