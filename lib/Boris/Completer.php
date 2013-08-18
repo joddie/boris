@@ -50,7 +50,7 @@ class Completer {
     switch($info->how) {
     case CompletionParser::COMPLETE_MEMBER:
     case CompletionParser::COMPLETE_STATIC:
-      $context = $this->getCompletionContext($info, $scope);
+      $context = $this->getLiveContext($info->context, $scope);
       if($info->how == CompletionParser::COMPLETE_MEMBER)
         list($properties, $methods) = $this->objectMembers($context);
       else
@@ -69,7 +69,7 @@ class Completer {
       break;
 
     case CompletionParser::COMPLETE_INDEX:
-      $context = $this->getCompletionContext($info, $scope);
+      $context = $this->getLiveContext($info->context, $scope);
       if(is_array($context)) {
         $completions = $this->filterCompletions(array_keys($context),
                                                 $info->symbol);
@@ -149,16 +149,17 @@ class Completer {
   }
 
   /**
-   * Given the info returned from CompletionParser::getCompletionInfo,
-   * return either a bare name or a live object suitable for passing
-   * to the reflection methods for completion/documentation.
+   * Given context information from
+   * CompletionParser::getCompletionInfo or ::getDocInfo, return
+   * either a bare name or a live object for passing to the
+   * reflection methods.
    */
-  private function getCompletionContext($info, $scope) {
+  private function getLiveContext($info, $scope) {
     if($info->is_bare) {
-      return $info->base;
+      return $info->text;
     } else {
       /* FIXME: This should be evaluated safely by forking, as with normal evaluation */
-      return $this->evalWorker->_evalInScope('return ' . $info->base . ';', $scope);
+      return $this->evalWorker->_evalInScope('return ' . $info->text . ';', $scope);
     }
   }
 
@@ -186,7 +187,8 @@ class Completer {
   }
 
   /**
-   * Return the names of all defined classes, interfaces, functions, and special constructs.
+   * Return the names of all defined classes, interfaces, functions,
+   * and special constructs.
    */
   private function bareSymbols() {
     $classes = get_declared_classes();
@@ -221,12 +223,12 @@ class Completer {
     }
   }
 
-/**
- * Return the static methods, properties and constants of an object or class.
- * These are the symbols which can appear after the :: operator.
- *
- * Properties and constants are case sensitive, but methods are not.
- */
+  /**
+   * Return the static methods, properties and constants of an object or class.
+   * These are the symbols which can appear after the :: operator.
+   *
+   * Properties and constants are case sensitive, but methods are not.
+   */
   private function staticMembers($obj) {
     try {
       $refl = new \ReflectionClass($obj);
@@ -235,8 +237,7 @@ class Completer {
                            $refl->getMethods(\ReflectionMethod::IS_STATIC));
       $properties = array_merge(array_keys($refl->getConstants()),
                                 array_map(function ($prop_name) { return '$' . $prop_name; },
-                                          array_keys($refl->getStaticProperties(
-                                            \ReflectionProperty::IS_PUBLIC))));
+                                          array_keys($refl->getStaticProperties())));
       return array($properties, $methods);
 
     } catch(\ReflectionException $e) {
@@ -261,25 +262,22 @@ class Completer {
     if(!$info) return NULL;
 
     try {
-      switch($info[0]) {
+      switch($info->how) {
       case CompletionParser::FUNCTION_INFO:
-        return new \ReflectionFunction($info[1]);
+        return new \ReflectionFunction($info->name);
         break;
 
       case CompletionParser::CLASS_INFO:
         try {
-          return new \ReflectionMethod($info[1], '__construct');
+          return new \ReflectionMethod($info->name, '__construct');
         } catch (\ReflectionException $e) {
-          return new \ReflectionMethod($info[1], $info[1]);
+          return new \ReflectionMethod($info->name, $info->name);
         }
         break;
 
       case CompletionParser::METHOD_INFO:
-        list(, $base, $bare, $method) = $info;
-        /* FIXME: This should be evaluated safely by forking */
-        if($bare) $obj = $base;
-        else $obj = $this->evalWorker->_evalInScope("return $base;", $scope);
-        return new \ReflectionMethod($obj, $method);
+        $context = $this->getLiveContext($info->context, $scope);
+        return new \ReflectionMethod($context, $info->name);
         break;
 
       default:

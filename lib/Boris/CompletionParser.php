@@ -24,89 +24,87 @@ class CompletionParser {
    */
   public function getCompletionInfo($input) {
     $tokens = $this->tokenize($input);
+    $line_end = strlen($input);
     if(count($tokens) === 0) {
-      $end = strlen($input);
-      return (object) array('how' => self::COMPLETE_SYMBOL,
-                            'symbol' => '',
-                            'start' => $end, 'end' => $end);
+      return $this->completionInfo(self::COMPLETE_SYMBOL, NULL, $line_end);
     }
     elseif (($match = $this->popMatch($tokens, array(T_OBJECT_OPERATOR)))
-        || ($match = $this->popMatch($tokens, array(T_DOUBLE_COLON)))) {
+            || ($match = $this->popMatch($tokens, array(T_DOUBLE_COLON)))) {
       $operator = $match[0];
-      list($base, $is_bare) = $this->getBaseTokens($tokens);
-      if($operator->type == T_OBJECT_OPERATOR) $how = self::COMPLETE_MEMBER;
-      else $how = self::COMPLETE_STATIC;
-      $end = strlen($input);
-      return (object) array('how' => $how,
-                            'base' => $base, 'is_bare' => $is_bare,
-                            'symbol' => '',
-                            'start' => $end, 'end' => $end);
+      $context = $this->getContext($tokens);
+      if($operator->type == T_OBJECT_OPERATOR) {
+        return $this->completionInfo(self::COMPLETE_MEMBER, $context, $line_end);
+      } else {
+        return $this->completionInfo(self::COMPLETE_STATIC, $context, $line_end);
+      }
     }
-    elseif (($matches = $this->popMatch($tokens, array(T_OBJECT_OPERATOR, T_STRING)))) {
-      $symbol = $matches[1];
-      list($base, $is_bare) = $this->getBaseTokens($tokens);
-      if($is_bare) return NULL;
-      return (object) array('how' => self::COMPLETE_MEMBER,
-                            'base' => $base, 'is_bare' => FALSE,
-                            'symbol' => $symbol->text,
-                            'start' => $symbol->start, 'end' => $symbol->end);
+    elseif (($match = $this->popMatch($tokens, array(T_OBJECT_OPERATOR, T_STRING)))) {
+      $symbol = $match[1];
+      $context = $this->getContext($tokens);
+      if($context->is_bare) return NULL;
+      return $this->completionInfo(self::COMPLETE_MEMBER, $context, $symbol);
     }
-    elseif   (($matches = $this->popMatch($tokens, array(T_DOUBLE_COLON, T_STRING)))
-              || ($matches = $this->popMatch($tokens, array(T_DOUBLE_COLON, T_VARIABLE)))) {
-      $symbol = $matches[1];
-      list($base, $is_bare) = $this->getBaseTokens($tokens);
-      return (object) array('how' => self::COMPLETE_STATIC,
-                            'base' => $base, 'is_bare' => $is_bare,
-                            'symbol' => $symbol->text,
-                            'start' => $symbol->start, 'end' => $symbol->end);
+    elseif (($match = $this->popMatch($tokens, array(T_DOUBLE_COLON, T_STRING)))
+            || ($match = $this->popMatch($tokens, array(T_DOUBLE_COLON, T_VARIABLE)))
+            || ($match = $this->popMatch($tokens, array(T_DOUBLE_COLON, '$')))) {
+      $symbol = $match[1];
+      $context = $this->getContext($tokens);
+      return $this->completionInfo(self::COMPLETE_STATIC, $context, $symbol);
     }
-    elseif (($matches = $this->popMatch($tokens, array(T_VARIABLE)))) {
-      $symbol = $matches[0];
-      return (object) array('how' => self::COMPLETE_VARIABLE,
-                            'symbol' => $symbol->text,
-                            'start' => $symbol->start, 'end' => $symbol->end);
+    elseif (($match = $this->popMatch($tokens, array(T_VARIABLE)))) {
+      $symbol = $match[0];
+      return $this->completionInfo(self::COMPLETE_VARIABLE, NULL, $symbol);
     }
-    elseif (($matches = $this->popMatch($tokens, array('[', T_STRING)))
-            || ($matches = $this->popMatch($tokens, array('[', T_ENCAPSED_AND_WHITESPACE)))
-            || ($matches = $this->popMatch($tokens, array('[', '"', T_ENCAPSED_AND_WHITESPACE)))) {
-      $symbol = $matches[count($matches) - 1];
+    elseif (($match = $this->popMatch($tokens, array('[', T_ENCAPSED_AND_WHITESPACE)))
+            || ($match = $this->popMatch($tokens, array('[', '"', T_ENCAPSED_AND_WHITESPACE)))) {
+      $symbol = $match[count($match) - 1];
       /* Bit of a hack, here. */
-      if($symbol->type == T_ENCAPSED_AND_WHITESPACE && count($matches) == 2) {
+      if($symbol->type == T_ENCAPSED_AND_WHITESPACE && count($match) == 2) {
         /* Strip off the beginning single quote */
         $symbol->start += 1;
         $symbol->text = substr($symbol->text, 1);
       }
-      list($base, $is_bare) = $this->getBaseTokens($tokens);
-      if($is_bare) return NULL;
-      return (object) array('how' => self::COMPLETE_INDEX,
-                            'base' => $base, 'is_bare' => FALSE,
-                            'symbol' => $symbol->text,
-                            'start' => $symbol->start, 'end' => $symbol->end);
+      $context = $this->getContext($tokens);
+      if($context->is_bare) return NULL;
+      return $this->completionInfo(self::COMPLETE_INDEX, $context, $symbol);
     }
-    elseif (($matches = $this->popMatch($tokens, array(T_NEW)))) {
-      $end = strlen($input);
-      return (object) array('how' => self::COMPLETE_CLASS,
-                            'symbol' => '',
-                            'start' => $end, 'end' => $end);
+    elseif (($match = $this->popMatch($tokens, array(T_NEW)))) {
+      return $this->completionInfo(self::COMPLETE_CLASS, NULL, $line_end);
     }
-    elseif (($matches = $this->popQualifiedName($tokens, TRUE))) {
-      if($new = $this->popMatch($tokens, array(T_NEW))) {
-        $how = self::COMPLETE_CLASS;
+    elseif (($match = $this->popQualifiedName($tokens, TRUE))) {
+      if($this->popMatch($tokens, array(T_NEW))) {
+        return $this->completionInfo(self::COMPLETE_CLASS, NULL, $match);
       } else {
-        $how = self::COMPLETE_SYMBOL;
+        return $this->completionInfo(self::COMPLETE_SYMBOL, NULL, $match);
       }
-      $name = $this->tokensText($matches);
-      $bounds = $this->tokensBounds($matches);
-      return (object) array('how' => $how,
-                            'symbol' => $name,
-                            'start' => $bounds[0],
-                            'end' => $bounds[1]);
     }
     else {
       return NULL;
     }
   }
 
+  private function completionInfo($how, $context, $fragment) {
+    if(is_numeric($fragment)) {
+      // Complete the empty string at end of line
+      $symbol = '';
+      $start = $end = $fragment;
+    }
+    elseif(is_array($fragment)) {
+      // List of tokens
+      $symbol = $this->tokensText($fragment);
+      list($start, $end) = $this->tokensBounds($fragment);
+    }
+    else {
+      // Single token
+      $symbol = $fragment->text;
+      $start = $fragment->start;
+      $end = $fragment->end;
+    }
+    return (object) array('how' => $how,
+                          'context' => $context,
+                          'symbol' => $symbol,
+                          'start' => $start, 'end' => $end);
+  }
 
   /**
    * Partial parse for documentation lookup
@@ -120,22 +118,27 @@ class CompletionParser {
     if (($matches = $this->popMatch($tokens, array(T_OBJECT_OPERATOR, T_STRING)))
         || ($matches = $this->popMatch($tokens, array(T_DOUBLE_COLON, T_STRING)))) {
       list(, $method) = $matches;
-      list($base, $bare) = $this->getBaseTokens($tokens);
-      return array(self::METHOD_INFO, $base, $bare, $method->text);
+      $context = $this->getContext($tokens);
+      return $this->docInfo(self::METHOD_INFO, $method->text, $context);
     }
     elseif ($name = $this->popQualifiedName($tokens)) {
       if ($this->matchEnd($tokens, array(T_NEW))) {
-        return array(self::CLASS_INFO, $this->tokensText($name));
+        return $this->docInfo(self::CLASS_INFO, $this->tokensText($name));
       }
       else {
-        return array(self::FUNCTION_INFO, $this->tokensText($name));
+        return $this->docInfo(self::FUNCTION_INFO, $this->tokensText($name));
       }
     }
-    else return FALSE;
+    else return NULL;
   }
 
+  private function docInfo($how, $name, $context = NULL) {
+    return (object) array('how' => $how,
+                          'name' => $name,
+                          'context' => $context);
+  }
 
-  /* private methods below */
+  /* Private methods below */
 
   /**
    * Provide a nicer interface to PHP's built-in tokenizer, by
@@ -145,7 +148,8 @@ class CompletionParser {
   function tokenize($input) {
     static $dummy = '<?php ';
 
-    $raw_tokens = token_get_all($dummy . $input);
+    /* Avoid a warning about incomplete comments */
+    $raw_tokens = @token_get_all($dummy . $input);
     $pos = 0;
     $tokens = array();
 
@@ -166,9 +170,10 @@ class CompletionParser {
       array_push($tokens, $token);
     }
 
-    /* Remove whitespace and renumber indices from 0 */
+    /* Remove whitespace and comments, and renumber indices from 0 */
     return array_values(array_filter($tokens, function($token) {
-      return $token->type !== T_WHITESPACE;
+      return $token->type !== T_WHITESPACE
+        && $token->type !== T_COMMENT;
     }));
   }
 
@@ -244,13 +249,13 @@ class CompletionParser {
    * then the portion of the line which needs evaluation is
    *   $arr['index'][123]->member
    *
-   * The getCompletionInfo method takes care of matching and removing
-   * portion at the end of the line ("->x_" in the example above).
-   * This function works by scanning backward from just before that
-   * fragment, accepting anything that looks like either a constant
-   * array index or a property lookup.
+   * The getCompletionInfo method matches and removes the fragment at
+   * the end of the line ("->x_" in the example above).  This function
+   * works by scanning backward from just before that fragment,
+   * accepting anything that looks like either a constant array index
+   * or a property lookup.
    */
-  private function getBaseTokens ($tokens) {
+  private function getContext ($tokens) {
     $match = array();
     $is_bare = FALSE;
     while(count($tokens)) {
@@ -289,9 +294,11 @@ class CompletionParser {
     }
 
     if(count($match)) {
-      return array($this->tokensText($match), $is_bare);
+      return (object) array('text' => $this->tokensText($match),
+                            'is_bare' => $is_bare);
     }
-    else return FALSE;
+    else
+      return FALSE;
   }
 
 }
