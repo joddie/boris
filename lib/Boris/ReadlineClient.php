@@ -35,11 +35,8 @@ class ReadlineClient {
   public function start($prompt, $historyFile) {
     readline_read_history($historyFile);
     $rl_info = readline_info();
-    if ($rl_info['library_version'] == 'EditLine wrapper') {
-      readline_completion_function(array($this, 'libeditCompletionCallback'));
-    } else {
-      readline_completion_function(array($this, 'readlineCompletionCallback'));
-    }
+    /* todo: check for buggy libedit somehow? */
+    readline_completion_function(array($this, 'readlineCompletionCallback'));
 
     declare(ticks = 1);
     pcntl_signal(SIGCHLD, SIG_IGN);
@@ -129,7 +126,7 @@ class ReadlineClient {
     $this->_writeMessage(array('operation' => 'complete',
                                'line' => $line));
     $response = $this->_read_unserialize();
-    if(!$response) return array();
+    if(!$response) return array($word);
     list($start, $end, $completions) = array($response->start, $response->end,
                                              $response->completions);
 
@@ -138,7 +135,7 @@ class ReadlineClient {
      * up the returned completions accordingly. */
     $rl_start = $rl_info['point'] - strlen($word);
     $rl_end = $rl_info['point'];
-    if(!$completions) return NULL;
+    if(!$completions) return array($word);
     if($start < $rl_start) {
       foreach($completions as &$c) {
         $c = substr($c, $rl_start - $start);
@@ -151,7 +148,10 @@ class ReadlineClient {
     return $completions;
   }
 
-  public function libeditCompletionCallback($word) {
+  /* Possible workaround for buggy libedits on OS X / Macports, other
+   * platforms?
+   */
+  public function simpleCompletionCallback($word) {
     $this->_writeMessage(array('operation' => 'complete',
                                'line' => $word));
     $response = $this->_read_unserialize();
