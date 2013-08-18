@@ -79,7 +79,7 @@ class CompletionParser {
       list($base, $is_bare) = $this->getBaseTokens($tokens);
       if($is_bare) return NULL;
       return (object) array('how' => self::COMPLETE_INDEX,
-                            'base' => $base,
+                            'base' => $base, 'is_bare' => FALSE,
                             'symbol' => $symbol->text,
                             'start' => $symbol->start, 'end' => $symbol->end);
     }

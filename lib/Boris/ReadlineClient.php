@@ -35,7 +35,7 @@ class ReadlineClient {
   public function start($prompt, $historyFile) {
     readline_read_history($historyFile);
     $rl_info = readline_info();
-    /* todo: check for buggy libedit somehow? */
+    /* TODO: Some libedits (OS X?) are buggy. Check for this somehow? */
     readline_completion_function(array($this, 'readlineCompletionCallback'));
 
     declare(ticks = 1);
