@@ -82,63 +82,114 @@ class CompletionParserTest extends PHPUnit_Framework_TestCase
    *************************************************************/
   public function testMethodDocInfo() {
     $this->assertEquals($this->parser->getDocInfo('$x->y[2]->method'),
-                        array(\Boris\CompletionParser::METHOD_INFO,
-                              '$x->y[2]', FALSE,
-                              'method'));
+                        (object) array(
+                          'how' => \Boris\CompletionParser::METHOD_INFO,
+                          'context' => (object) array(
+                            'text' => '$x->y[2]', 'is_bare' => FALSE
+                          ),
+                          'name' => 'method'));
+
     $this->assertEquals($this->parser->getDocInfo('$x->y[2]->method ( '),
-                        array(\Boris\CompletionParser::METHOD_INFO,
-                              '$x->y[2]', FALSE,
-                              'method'));
+                        (object) array(
+                          'how' => \Boris\CompletionParser::METHOD_INFO,
+                          'context' => (object) array(
+                            'text' => '$x->y[2]', 'is_bare' => FALSE
+                          ),
+                          'name' => 'method'));
+    
     $this->assertEquals($this->parser->getDocInfo('SomeClass::static_method'),
-                        array(\Boris\CompletionParser::METHOD_INFO,
-                              'SomeClass', TRUE,
-                              'static_method'));
+                        (object) array(
+                          'how' => \Boris\CompletionParser::METHOD_INFO,
+                          'context' => (object) array(
+                            'text' => 'SomeClass', 'is_bare' => TRUE
+                          ),
+                          'name' => 'static_method'));
+    
     $this->assertEquals($this->parser->getDocInfo('\Somewhere\SomeClass::static_method ( '),
-                        array(\Boris\CompletionParser::METHOD_INFO,
-                              '\Somewhere\SomeClass', TRUE,
-                              'static_method'));
+                        (object) array(
+                          'how' => \Boris\CompletionParser::METHOD_INFO,
+                          'context' => (object) array(
+                            'text' => '\Somewhere\SomeClass', 'is_bare' => TRUE
+                          ),
+                          'name' => 'static_method'));
+    
   }
 
   public function testClassDocInfo() {
     $this->assertEquals($this->parser->getDocInfo('new someClass'),
-                        array(\Boris\CompletionParser::CLASS_INFO,
-                              'someClass'));
+                        (object) array(
+                          'how' => \Boris\CompletionParser::CLASS_INFO,
+                          'name' => 'someClass',
+                          'context' => NULL));
+    
     $this->assertEquals($this->parser->getDocInfo('new someClass( '),
-                        array(\Boris\CompletionParser::CLASS_INFO,
-                              'someClass'));
+                        (object) array(
+                          'how' => \Boris\CompletionParser::CLASS_INFO,
+                          'name' => 'someClass',
+                          'context' => NULL));
+    
     $this->assertEquals($this->parser->getDocInfo('new \SomeOtherClass'),
-                        array(\Boris\CompletionParser::CLASS_INFO,
-                              '\SomeOtherClass'));
+                        (object) array(
+                          'how' => \Boris\CompletionParser::CLASS_INFO,
+                          'name' => '\SomeOtherClass',
+                          'context' => NULL));
+    
     $this->assertEquals($this->parser->getDocInfo('new \SomeOtherClass('),
-                        array(\Boris\CompletionParser::CLASS_INFO,
-                              '\SomeOtherClass'));
+                        (object) array(
+                          'how' => \Boris\CompletionParser::CLASS_INFO,
+                          'name' => '\SomeOtherClass',
+                          'context' => NULL));
+    
     $this->assertEquals($this->parser->getDocInfo('new \SomeNamespace\SomeOtherClass('),
-                        array(\Boris\CompletionParser::CLASS_INFO,
-                              '\SomeNamespace\SomeOtherClass'));
+                        (object) array(
+                          'how' => \Boris\CompletionParser::CLASS_INFO,
+                          'name' => '\SomeNamespace\SomeOtherClass',
+                          'context' => NULL));
+    
     $this->assertEquals($this->parser->getDocInfo('new SomeNamespace\SomeOtherClass('),
-                        array(\Boris\CompletionParser::CLASS_INFO,
-                              'SomeNamespace\SomeOtherClass'));
+                        (object) array(
+                          'how' => \Boris\CompletionParser::CLASS_INFO,
+                          'name' => 'SomeNamespace\SomeOtherClass',
+                          'context' => NULL));
+    
     $this->assertEquals($this->parser->getDocInfo('new \SomeNamespace\SubNamespace\SomeOtherClass'),
-                        array(\Boris\CompletionParser::CLASS_INFO,
-                              '\SomeNamespace\SubNamespace\SomeOtherClass'));
+                        (object) array(
+                          'how' => \Boris\CompletionParser::CLASS_INFO,
+                          'name' => '\SomeNamespace\SubNamespace\SomeOtherClass',
+                          'context' => NULL));
   }
 
   public function testFunctionDocInfo() {
     $this->assertEquals($this->parser->getDocInfo('some_function_call'),
-                        array(\Boris\CompletionParser::FUNCTION_INFO,
-                              'some_function_call'));
+                        (object) array(
+                          'how' => \Boris\CompletionParser::FUNCTION_INFO,
+                          'name' => 'some_function_call',
+                          'context' => NULL));
+    
     $this->assertEquals($this->parser->getDocInfo('some_function_call('),
-                        array(\Boris\CompletionParser::FUNCTION_INFO,
-                              'some_function_call'));
+                        (object) array(
+                          'how' => \Boris\CompletionParser::FUNCTION_INFO,
+                          'name' => 'some_function_call',
+                          'context' => NULL));
+    
     $this->assertEquals($this->parser->getDocInfo('\some_function_call('),
-                        array(\Boris\CompletionParser::FUNCTION_INFO,
-                              '\some_function_call'));
+                        (object) array(
+                          'how' => \Boris\CompletionParser::FUNCTION_INFO,
+                          'name' => '\some_function_call',
+                          'context' => NULL));
+    
     $this->assertEquals($this->parser->getDocInfo('\SomeNamespace\some_function_call'),
-                        array(\Boris\CompletionParser::FUNCTION_INFO,
-                              '\SomeNamespace\some_function_call'));
+                        (object) array(
+                          'how' => \Boris\CompletionParser::FUNCTION_INFO,
+                          'name' => '\SomeNamespace\some_function_call',
+                          'context' => NULL));
+    
     $this->assertEquals($this->parser->getDocInfo('SomeNamespace\SubNamespace\function_call('),
-                        array(\Boris\CompletionParser::FUNCTION_INFO,
-                              'SomeNamespace\SubNamespace\function_call'));
+                        (object) array(
+                          'how' => \Boris\CompletionParser::FUNCTION_INFO,
+                          'name' => 'SomeNamespace\SubNamespace\function_call',
+                          'context' => NULL));
+    
   }
   
 
@@ -159,7 +210,9 @@ class CompletionParserTest extends PHPUnit_Framework_TestCase
                               'how' => \Boris\CompletionParser::COMPLETE_VARIABLE,
                               'symbol' => '$variable',
                               'start' => 0,
-                              'end' => 9));
+                              'end' => 9,
+                              'context' => NULL
+                            ));
     }
 
     public function testVarUnderscore() {
@@ -169,7 +222,8 @@ class CompletionParserTest extends PHPUnit_Framework_TestCase
                               'how' => \Boris\CompletionParser::COMPLETE_VARIABLE,
                               'symbol' => '$_var',
                               'start' => 0,
-                              'end' => 5
+                              'end' => 5,
+                              'context' => NULL
                             ));
     }
 
@@ -181,7 +235,8 @@ class CompletionParserTest extends PHPUnit_Framework_TestCase
                               'how' => \Boris\CompletionParser::COMPLETE_VARIABLE,
                               'symbol' => '$var1_with_more_words',
                               'start' => 0,
-                              'end' => 21
+                              'end' => 21,
+                              'context' => NULL
                             ));
     }
 
@@ -190,7 +245,10 @@ class CompletionParserTest extends PHPUnit_Framework_TestCase
         $this->assertEquals($this->lineCompletionInfo($line),
                             (object) array(
                               'how' => \Boris\CompletionParser::COMPLETE_INDEX,
-                              'base' => '$variable',
+                              'context' => (object) array(
+                                'text' => '$variable',
+                                'is_bare' => FALSE
+                              ),
                               'symbol' => 'strin',
                               'start' => 11,
                               'end' => 16));
@@ -201,7 +259,10 @@ class CompletionParserTest extends PHPUnit_Framework_TestCase
         $this->assertEquals($this->lineCompletionInfo($line),
                             (object) array(
                               'how' => \Boris\CompletionParser::COMPLETE_MEMBER,
-                              'base' => '$variable',
+                              'context' => (object) array(
+                                'text' => '$variable',
+                                'is_bare' => FALSE
+                              ),
                               'symbol' => 'member',
                               'start' => 11,
                               'end' => 17
@@ -213,7 +274,10 @@ class CompletionParserTest extends PHPUnit_Framework_TestCase
         $this->assertEquals($this->lineCompletionInfo($line),
                             (object) array(
                               'how' => \Boris\CompletionParser::COMPLETE_MEMBER,
-                              'base' => '$variable',
+                              'context' => (object) array(
+                                'text' => '$variable',
+                                'is_bare' => FALSE
+                              ),
                               'symbol' => 'member_with_more_words',
                               'start' => 11,
                               'end' => 33
@@ -225,7 +289,10 @@ class CompletionParserTest extends PHPUnit_Framework_TestCase
         $this->assertEquals($this->lineCompletionInfo($line),
                             (object) array(
                               'how' => \Boris\CompletionParser::COMPLETE_MEMBER,
-                              'base' => '$variable',
+                              'context' => (object) array(
+                                'text' => '$variable',
+                                'is_bare' => FALSE
+                              ),
                               'symbol' => '__member_with_2_or_3_more_words',
                               'start' => 11,
                               'end' => 42
@@ -238,7 +305,10 @@ class CompletionParserTest extends PHPUnit_Framework_TestCase
         $this->assertEquals($this->lineCompletionInfo($line),
                             (object) array(
                               'how' => \Boris\CompletionParser::COMPLETE_MEMBER,
-                              'base' => '$variable',
+                              'context' => (object) array(
+                                'text' => '$variable',
+                                'is_bare' => FALSE
+                              ),
                               'symbol' => 'member',
                               'start' => 15,
                               'end' => 21
@@ -252,7 +322,8 @@ class CompletionParserTest extends PHPUnit_Framework_TestCase
                               'how' => \Boris\CompletionParser::COMPLETE_VARIABLE,
                               'symbol' => '$member',
                               'start' => 11,
-                              'end' => 18
+                              'end' => 18,
+                              'context' => NULL
                             ));
     }
 
@@ -261,7 +332,10 @@ class CompletionParserTest extends PHPUnit_Framework_TestCase
         $this->assertEquals($this->lineCompletionInfo($line),
                             (object) array(
                               'how' => \Boris\CompletionParser::COMPLETE_INDEX,
-                              'base' => '$variable',
+                              'context' => (object) array(
+                                'text' => '$variable',
+                                'is_bare' => FALSE
+                              ),
                               'symbol' => 'strin',
                               'start' => 11,
                               'end' => 16
@@ -273,7 +347,10 @@ class CompletionParserTest extends PHPUnit_Framework_TestCase
         $this->assertEquals($this->lineCompletionInfo($line),
                             (object) array(
                               'how' => \Boris\CompletionParser::COMPLETE_INDEX,
-                              'base' => '$variable',
+                              'context' => (object) array(
+                                'text' => '$variable',
+                                'is_bare' => FALSE
+                              ),
                               'symbol' => 'string with escapes: \\\' \\\\ ',
                               'start' => 11,
                               'end' => 38
@@ -285,8 +362,10 @@ class CompletionParserTest extends PHPUnit_Framework_TestCase
       $this->assertEquals($this->lineCompletionInfo($line),
                           (object) array(
                             'how' => \Boris\CompletionParser::COMPLETE_STATIC,
-                            'base' => '\Namespaced\ClassName',
-                            'is_bare' => true,
+                            'context' => (object) array(
+                              'text' => '\Namespaced\ClassName',
+                              'is_bare' => true,
+                            ),
                             'symbol' => '',
                             'start' => 23,
                             'end' => 23));
@@ -295,8 +374,10 @@ class CompletionParserTest extends PHPUnit_Framework_TestCase
         $this->assertEquals($this->lineCompletionInfo($line),
                             (object) array(
                               'how' => \Boris\CompletionParser::COMPLETE_STATIC,
-                              'base' => 'ClassName',
-                              'is_bare' => true,
+                              'context' => (object) array(
+                                'text' => 'ClassName',
+                                'is_bare' => true,
+                              ),
                               'symbol' => '$static_member',
                               'start' => 11,
                               'end' => 25
@@ -308,7 +389,10 @@ class CompletionParserTest extends PHPUnit_Framework_TestCase
         $this->assertEquals($this->lineCompletionInfo($line),
                             (object) array(
                               'how' => \Boris\CompletionParser::COMPLETE_MEMBER,
-                              'base' => '$_some_var->member1',
+                              'context' => (object) array(
+                                'text' => '$_some_var->member1',
+                                'is_bare' => FALSE
+                              ),
                               'symbol' => 'member2',
                               'start' => 21,
                               'end' => 28
@@ -321,8 +405,10 @@ class CompletionParserTest extends PHPUnit_Framework_TestCase
         $this->assertEquals($this->lineCompletionInfo($line),
                             (object) array(
                               'how' => \Boris\CompletionParser::COMPLETE_MEMBER,
-                              'base' => '$_some_var["index"][123]',
-                              'is_bare' => false,
+                              'context' => (object) array(
+                                'text' => '$_some_var["index"][123]',
+                                'is_bare' => false,
+                              ),
                               'symbol' => '',
                               'start' => 26,
                               'end' => 26
@@ -339,8 +425,10 @@ class CompletionParserTest extends PHPUnit_Framework_TestCase
         $this->assertEquals($this->lineCompletionInfo($line),
                             (object) array(
                               'how' => \Boris\CompletionParser::COMPLETE_MEMBER,
-                              'base' => '$_some_var::$static_member->_member["index"][123]',
-                              'is_bare' => false,
+                              'context' => (object) array(
+                                'text' => '$_some_var::$static_member->_member["index"][123]',
+                                'is_bare' => false
+                              ),
                               'symbol' => '',
                               'start' => 51,
                               'end' => 51
@@ -354,14 +442,18 @@ class CompletionParserTest extends PHPUnit_Framework_TestCase
                               'how' => \Boris\CompletionParser::COMPLETE_VARIABLE,
                               'symbol' => '$something_else',
                               'start' => 26,
-                              'end' => 41
+                              'end' => 41,
+                              'context' => NULL
                             ));
 
         $line = 'some_function($something->foo, $something_else["bar"]->xyz';
         $this->assertEquals($this->lineCompletionInfo($line),
                             (object) array(
                               'how' => \Boris\CompletionParser::COMPLETE_MEMBER,
-                              'base' => '$something_else["bar"]',
+                              'context' => (object) array(
+                                'text' => '$something_else["bar"]',
+                                'is_bare' => FALSE
+                              ),
                               'symbol' => 'xyz',
                               'start' => 55,
                               'end' => 58
