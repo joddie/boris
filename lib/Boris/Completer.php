@@ -112,10 +112,11 @@ class Completer {
    * method, or constructor at the end of $line.
    */
   public function getHint($line, $scope) {
-    $refl = $this->getReflectionObject($line, $scope);
+    $info = $this->parser->getDocInfo($line);
+    $refl = $this->getReflectionObject($info, $scope);
     if(!$refl) return NULL;
     try {
-      return $this->formatFunction($refl);
+      return $this->formatFunction($refl, $info->arg);
     } catch(\ReflectionException $e) {
       return NULL;
     }
@@ -125,7 +126,8 @@ class Completer {
    * Return a multi-line string for the class, method, or function at the end of $line.
    */
   public function getDocumentation($line, $scope) {
-    $refl = $this->getReflectionObject($line, $scope);
+    $info = $this->parser->getDocInfo($line);
+    $refl = $this->getReflectionObject($info, $scope);
     if(!$refl) return NULL;
     try {
       return $refl->__toString();
@@ -257,10 +259,8 @@ class Completer {
    * Return a ReflectionFunction or ReflectionMethod object describing
    * the function, method call, or constructor at the end of $line
    */
-  private function getReflectionObject($line, $scope) {
-    $info = $this->parser->getDocInfo($line);
+  private function getReflectionObject($info, $scope) {
     if(!$info) return NULL;
-
     try {
       switch($info->how) {
       case CompletionParser::FUNCTION_INFO:
@@ -293,12 +293,12 @@ class Completer {
   /**
    * Format information about function / method arguments, for getHint()
    */
-  private function formatFunction($refl) {
+  private function formatFunction($refl, $arg) {
     $params = $refl->getParameters();
     $required = array_splice($params, 0, $refl->getNumberOfRequiredParameters());
-    $arg_string = $this->formatParams($required);
+    $arg_string = $this->formatParams($required, $arg);
     if(count($params)) {
-      $arg_string .= sprintf(' [, %s ]', $this->formatParams($params));
+      $arg_string .= sprintf(' [, %s ]', $this->formatParams($params, $arg - count($required)));
     }
 
     return sprintf('%s%s ( %s )',
@@ -307,18 +307,20 @@ class Completer {
                    $arg_string);
   }
 
-  private function formatParams($params) {
-    return implode(', ', array_map(function($param) {
+  private function formatParams($params, $arg) {
+    $formatted = array();
+    foreach($params as $i => $param) {
       $class = $param->getClass();
-      $base = sprintf('%s%s$%s',
-                      $class ? "$class " : '',
-                      $param->isPassedByReference() ? '&' : '',
-                      $param->name);
+      $string = sprintf('%s%s$%s',
+                        $class ? "$class " : '',
+                        $param->isPassedByReference() ? '&' : '',
+                        $param->name);
+      if($i == $arg) $string = strtoupper($string);
       if($param->isDefaultValueAvailable())
-        return $base . " = " . var_export($param->getDefaultValue(), TRUE);
-      else
-        return $base;
-    }, $params));
+        $string .= " = " . var_export($param->getDefaultValue(), TRUE);
+      $formatted[] = $string;
+    }
+    return implode(', ', $formatted);
   }
 
 }

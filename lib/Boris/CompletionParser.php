@@ -109,33 +109,64 @@ class CompletionParser {
   /**
    * Partial parse for documentation lookup
    */
+  static $pairs = array('(' => ')',
+                        '[' => ']',
+                        '{' => '}');
   public function getDocInfo($input) {
     $tokens = $this->tokenize($input);
-    if ($this->matchEnd($tokens, array('('))) {
-      array_pop($tokens);
+    $stack = array();
+    $arg = 0;
+    
+    while(count($tokens)) {
+      foreach(self::$pairs as $open => $close) {
+        if($this->popMatch($tokens, array($close))) {
+          array_unshift($stack, $open);
+          continue 2;
+        }
+        elseif($match = $this->popMatch($tokens, array($open))) {
+          if(count($stack) && $match[0]->type == $stack[0]) {
+            array_shift($stack);
+            continue 2;
+          }
+          elseif(!count($stack) && $match[0]->type == '(') {
+            break 2;
+          }
+          else return NULL;
+        }
+      }
+
+      if ($this->popMatch($tokens, array(','))) {
+        if (count($stack) == 0) $arg++;
+      }
+      else {
+        array_pop($tokens);
+      }
     }
 
-    if (($matches = $this->popMatch($tokens, array(T_OBJECT_OPERATOR, T_STRING)))
-        || ($matches = $this->popMatch($tokens, array(T_DOUBLE_COLON, T_STRING)))) {
-      list(, $method) = $matches;
+    if (!count($tokens)) return NULL;
+
+    if (($match = $this->popMatch($tokens, array(T_OBJECT_OPERATOR, T_STRING)))
+        || ($match = $this->popMatch($tokens, array(T_DOUBLE_COLON, T_STRING)))) {
+      list(, $method) = $match;
       $context = $this->getContext($tokens);
-      return $this->docInfo(self::METHOD_INFO, $method->text, $context);
+      return $this->docInfo(self::METHOD_INFO, $method->text, $arg, $context);
     }
     elseif ($name = $this->popQualifiedName($tokens)) {
       if ($this->matchEnd($tokens, array(T_NEW))) {
-        return $this->docInfo(self::CLASS_INFO, $this->tokensText($name));
+        return $this->docInfo(self::CLASS_INFO, $this->tokensText($name), $arg);
       }
       else {
-        return $this->docInfo(self::FUNCTION_INFO, $this->tokensText($name));
+        return $this->docInfo(self::FUNCTION_INFO, $this->tokensText($name), $arg);
       }
     }
     else return NULL;
   }
 
-  private function docInfo($how, $name, $context = NULL) {
+  private function docInfo($how, $name, $count, $context = NULL) {
     return (object) array('how' => $how,
                           'name' => $name,
-                          'context' => $context);
+                          'context' => $context,
+                          'arg' => $count);
   }
 
   /* Private methods below */
