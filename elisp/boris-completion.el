@@ -3,7 +3,7 @@
 ;; Copyright (C) 2013 joddie <jonxfield@gmail.com>
 
 ;; Author: joddie
-;; Version: 0.13
+;; Version: 0.16
 ;; Keywords: php, repl, boris
 
 ;; This file is NOT part of GNU Emacs.
@@ -48,10 +48,6 @@
 (defvar boris-response-flag nil)
 
 (defvar boris-original-php-eldoc-function nil)
-(defvar boris-namespace-syntax-table
-  (let ((table (copy-syntax-table php-mode-syntax-table)))
-    (modify-syntax-entry ?\\ "_" table)
-    table))
 
 (defconst boris-request-format
   '((:length long)
@@ -61,6 +57,8 @@
   '((:code str 1)
     (:length long)
     (:data str (:length))))
+
+(defvar boris-timeout 0.5)
 
 ;;;###autoload
 (defun boris-connect ()
@@ -95,12 +93,12 @@
   (setq boris-response nil
         boris-response-flag nil)
   (process-send-string boris-process (boris-pack-request data))
-  (let ((timeout 2.0) (start-time (float-time)))
+  (let ((start-time (float-time)))
     (while (and (not boris-response-flag)
-                (< (- (float-time) start-time) timeout))
+                (< (- (float-time) start-time) boris-timeout))
       (accept-process-output boris-process 0 100 t)))
   (unless boris-response-flag
-    (warn "Boris response timeout."))
+    (message "Boris response timeout."))
   boris-response)
 
 (defvar boris-response-code-regexp
@@ -126,8 +124,8 @@
             (let ((garbage
                    (delete-and-extract-region
                     (point-min) (match-beginning 0))))
-              (warn "Discarded partial message \"%s\" from Boris."
-                     garbage)))))
+              (message "Discarded partial message \"%s\" from Boris."
+                       garbage)))))
 
       (let ((unpacked
              (condition-case err
@@ -222,6 +220,8 @@
                           (get-process php-boris-process-name)))
         (php-boris))))
   (define-key php-mode-map (kbd "C-c d") 'boris-get-documentation)
+  (define-key php-mode-map (kbd "C-c C-/") 'boris-get-documentation)
+  (define-key php-mode-map (kbd "C-c C-k") 'boris-load-file)
   (add-hook 'php-mode-hook 'boris-php-mode-hook))
 
 (defun boris-php-mode-hook ()
@@ -236,6 +236,18 @@
   ;; (add-hook 'completion-at-point-functions
   ;;           'boris-completion-at-point nil t)
   )
+
+(defun boris-load-file (file-name)
+  (interactive (list (buffer-file-name)))
+  (unless (process-live-p php-boris-process-name)
+    (save-window-excursion
+      (php-boris)))
+  (let ((process (get-process php-boris-process-name)))
+    (comint-send-string process
+                        (format "require '%s';\n"
+                                (replace-regexp-in-string "'" "\\'" file-name)))
+    (pop-to-buffer (process-buffer process))))
+
 
 ;;;###autoload
 (defun boris-setup-php-boris-mode ()
@@ -257,6 +269,8 @@
   (add-hook 'php-boris-mode-hook 'boris-php-boris-mode-hook)
   
   (define-key php-boris-mode-map (kbd "C-c C-d") 'boris-get-documentation)
+  (define-key php-boris-mode-map (kbd "C-c d") 'boris-get-documentation)
+  (define-key php-boris-mode-map (kbd "C-c C-/") 'boris-get-documentation)
   (define-key php-boris-mode-map (kbd "C-c C-z") 'php-boris))
 
 (defun boris-php-boris-mode-hook ()
