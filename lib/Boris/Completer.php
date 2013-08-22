@@ -298,6 +298,7 @@ class Completer {
   /**
    * Format information about function / method arguments, for getHint()
    */
+  /* FIXME: refactor me */
   private function formatFunction($refl, $arg) {
     $params = $refl->getParameters();
     $required = array_splice($params, 0, $refl->getNumberOfRequiredParameters());
@@ -321,8 +322,11 @@ class Completer {
                         $param->isPassedByReference() ? '&' : '',
                         $param->name);
       if($i == $arg) $string = strtoupper($string);
-      if($param->isDefaultValueAvailable())
-        $string .= " = " . var_export($param->getDefaultValue(), TRUE);
+      if($param->isDefaultValueAvailable()) {
+        $default = var_export($param->getDefaultValue(), TRUE);
+        $default = preg_replace('/\s+/', ' ', $default);
+        $string .= " = " . $default;
+      }
       $formatted[] = $string;
     }
     return implode(', ', $formatted);
