@@ -3,7 +3,7 @@
 ;; Copyright (C) 2013 joddie <jonxfield@gmail.com>
 
 ;; Author: joddie
-;; Version: 0.16
+;; Version: 0.17
 ;; Keywords: php, repl, boris
 
 ;; This file is NOT part of GNU Emacs.
@@ -154,7 +154,10 @@
 (defun boris-completion-at-point ()
   (when (boris-require-connection)
     (let* ((line (buffer-substring-no-properties (point-at-bol) (point)))
-           (response (boris-call `((operation . complete) (line . ,line)))))
+           (evaluate-p (eq major-mode 'php-boris-mode))
+           (response (boris-call `((operation . complete)
+                                   (line . ,line)
+                                   (evaluate . ,evaluate-p)))))
       (when (and response (gethash "completions" response))
         (list
          (+ (point-at-bol) (gethash "start" response))
@@ -163,23 +166,23 @@
 
 ;;;###autoload
 (defun boris-eldoc-function ()
-  (or (and boris-original-php-eldoc-function
-           (not (eq boris-original-php-eldoc-function 'boris-eldoc-function))
-           (funcall boris-original-php-eldoc-function))
-      (when (boris-require-connection)
-        ;; fixme
-        (let ((line (buffer-substring-no-properties
-                     (point-at-bol) (point))))
-          (boris-call `((operation . hint) (line . ,line)))))))
+  (when (boris-require-connection)
+    ;; fixme
+    (let ((line (buffer-substring-no-properties (point-at-bol) (point)))
+          (evaluate-p (eq major-mode 'php-boris-mode)))
+      (boris-call `((operation . hint)
+                    (line . ,line)
+                    (evaluate . ,evaluate-p))))))
 
 ;;;###autoload
 (defun boris-get-documentation ()
   (interactive)
-  (let* ((line (buffer-substring-no-properties
-                (point-at-bol) (point)))
+  (let* ((line (buffer-substring-no-properties (point-at-bol) (point)))
+         (evaluate-p (eq major-mode 'php-boris-mode))
          (docs (boris-call
                 `((operation . documentation)
-                  (line . ,line)))))
+                  (line . ,line)
+                  (evaluate . ,evaluate-p)))))
     (when docs
       (with-help-window "*boris help*"
         (princ docs))

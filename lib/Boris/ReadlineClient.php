@@ -124,7 +124,8 @@ class ReadlineClient {
 
     /* Call the EvalWorker to perform completion */
     $this->_writeMessage(array('operation' => 'complete',
-                               'line' => $line));
+                               'line' => $line,
+                               'evaluate' => TRUE));
     $response = $this->_read_unserialize();
     if(!$response) return array($word);
     list($start, $end, $completions) = array($response->start, $response->end,

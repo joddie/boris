@@ -43,14 +43,18 @@ class Completer {
    * possible completions.  If no completions are available, returns
    * NULL.
    */
-  public function getCompletions($input, $scope) {
+  public function getCompletions($input, $evaluate, $scope) {
     $info = $this->parser->getCompletionInfo($input);
     if($info === NULL) return NULL;
 
     switch($info->how) {
     case CompletionParser::COMPLETE_MEMBER:
     case CompletionParser::COMPLETE_STATIC:
-      $context = $this->getLiveContext($info->context, $scope);
+      $context = $this->getLiveContext($info->context, $evaluate, $scope);
+      if(!$context) {
+        $completions = array();
+        break;
+      }
       if($info->how == CompletionParser::COMPLETE_MEMBER)
         list($properties, $methods) = $this->objectMembers($context);
       else
@@ -69,7 +73,7 @@ class Completer {
       break;
 
     case CompletionParser::COMPLETE_INDEX:
-      $context = $this->getLiveContext($info->context, $scope);
+      $context = $this->getLiveContext($info->context, $evaluate, $scope);
       if(is_array($context)) {
         $completions = $this->filterCompletions(array_keys($context),
                                                 $info->symbol);
@@ -111,9 +115,9 @@ class Completer {
    * Return a single-line description of the arguments for the function,
    * method, or constructor at the end of $line.
    */
-  public function getHint($line, $scope) {
+  public function getHint($line, $evaluate, $scope) {
     $info = $this->parser->getDocInfo($line);
-    $refl = $this->getReflectionObject($info, $scope);
+    $refl = $this->getReflectionObject($info, $evaluate, $scope);
     if(!$refl) return NULL;
     try {
       return $this->formatFunction($refl, $info->arg);
@@ -125,9 +129,9 @@ class Completer {
   /**
    * Return a multi-line string for the class, method, or function at the end of $line.
    */
-  public function getDocumentation($line, $scope) {
+  public function getDocumentation($line, $evaluate, $scope) {
     $info = $this->parser->getDocInfo($line);
-    $refl = $this->getReflectionObject($info, $scope);
+    $refl = $this->getReflectionObject($info, $evaluate, $scope);
     if(!$refl) return NULL;
     try {
       return $refl->__toString();
@@ -156,10 +160,11 @@ class Completer {
    * either a bare name or a live object for passing to the
    * reflection methods.
    */
-  private function getLiveContext($info, $scope) {
+  private function getLiveContext($info, $evaluate, $scope) {
     if($info->is_bare) {
       return $info->text;
     } else {
+      if(!$evaluate) return NULL;
       /* FIXME: This should be evaluated safely by forking, as with normal evaluation */
       return $this->evalWorker->_evalInScope('return ' . $info->text . ';', $scope);
     }
@@ -259,7 +264,7 @@ class Completer {
    * Return a ReflectionFunction or ReflectionMethod object describing
    * the function, method call, or constructor at the end of $line
    */
-  private function getReflectionObject($info, $scope) {
+  private function getReflectionObject($info, $evaluate, $scope) {
     if(!$info) return NULL;
     try {
       switch($info->how) {
@@ -276,7 +281,7 @@ class Completer {
         break;
 
       case CompletionParser::METHOD_INFO:
-        $context = $this->getLiveContext($info->context, $scope);
+        $context = $this->getLiveContext($info->context, $evaluate, $scope);
         return new \ReflectionMethod($context, $info->name);
         break;
 
