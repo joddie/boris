@@ -117,6 +117,7 @@ class Completer {
    */
   public function getHint($line, $evaluate, $scope) {
     $info = $this->parser->getDocInfo($line);
+    if(!$info) return NULL;
     $refl = $this->getReflectionObject($info, $evaluate, $scope);
     if(!$refl) return NULL;
     try {
@@ -131,6 +132,7 @@ class Completer {
    */
   public function getDocumentation($line, $evaluate, $scope) {
     $info = $this->parser->getDocInfo($line);
+    if(!$info) return NULL;
     $refl = $this->getReflectionObject($info, $evaluate, $scope);
     if(!$refl) return NULL;
     try {
