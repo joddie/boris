@@ -121,7 +121,7 @@ class Completer {
     $refl = $this->getReflectionObject($info, $evaluate, $scope);
     if(!$refl) return NULL;
     try {
-      return $this->formatFunction($refl, $info->arg);
+      return self::formatFunction($refl, $info->arg);
     } catch(\ReflectionException $e) {
       return NULL;
     }
@@ -300,38 +300,50 @@ class Completer {
   /**
    * Format information about function / method arguments, for getHint()
    */
-  /* FIXME: refactor me */
-  private function formatFunction($refl, $arg) {
-    $params = $refl->getParameters();
-    $required = array_splice($params, 0, $refl->getNumberOfRequiredParameters());
-    $arg_string = $this->formatParams($required, $arg);
-    if(count($params)) {
-      $arg_string .= sprintf(' [, %s ]', $this->formatParams($params, $arg - count($required)));
-    }
+  private static function formatFunction($refl, $arg) {
+    $params   = $refl->getParameters();
+    $n        = $refl->getNumberOfRequiredParameters();
+    $required = array_slice($params, 0, $n);
+    $optional = array_slice($params, $n);
 
-    return sprintf('%s%s ( %s )',
-                   $refl->returnsReference() ? '&' : '',
-                   ($refl->name == '__construct') ? $refl->getDeclaringClass()->name : $refl->name,
-                   $arg_string);
+    $arguments = count($optional)
+      ? sprintf('%s[, %s]',
+                self::formatParams($required, $arg),
+                self::formatParams($optional, $arg))
+      : self::formatParams($required, $arg);
+    $reference = $refl->returnsReference() ? '&' : '';
+    $name = $refl instanceof \ReflectionMethod && $refl->isConstructor()
+      ? $refl->getDeclaringClass()->name
+      : $refl->name;
+
+    return "{$reference}{$name}({$arguments})";
   }
 
-  private function formatParams($params, $arg) {
-    $formatted = array();
-    foreach($params as $i => $param) {
-      $class = $param->getClass();
-      $string = sprintf('%s%s$%s',
-                        $class ? "$class " : '',
-                        $param->isPassedByReference() ? '&' : '',
-                        $param->name);
-      if($i == $arg) $string = strtoupper($string);
+  private static function formatParams(array $params, $index) {
+    $args = array_map(function (\ReflectionParameter $param = NULL) use ($index) {
+      try {
+        $refl_class = $param->getClass();
+        if($refl_class)
+          $class = $refl_class->getName() . ' ';
+        else
+          $class = '';
+      } catch (\ReflectionException $e) {
+        $class = '';
+      }
+      $reference   = $param->isPassedByReference() ? '&' : '';
+      $var         = $reference . $param->name;
+      $highlighted = ($param->getPosition() == $index) ? strtoupper($var) : $var;
+      $arg         = "{$class}\${$highlighted}";
+
       if($param->isDefaultValueAvailable()) {
         $default = var_export($param->getDefaultValue(), TRUE);
         $default = preg_replace('/\s+/', ' ', $default);
-        $string .= " = " . $default;
+        return "{$arg} = {$default}";
+      } else {
+        return $arg;
       }
-      $formatted[] = $string;
-    }
-    return implode(', ', $formatted);
+    }, $params);
+    return implode(', ', $args);
   }
 
 }
