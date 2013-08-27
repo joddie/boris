@@ -166,9 +166,11 @@ class Completer {
     if($info->is_bare) {
       return $info->text;
     } else {
+      /* Avoid evaluating nonsense in source buffers */
       if(!$evaluate) return NULL;
-      /* FIXME: This should be evaluated safely by forking, as with normal evaluation */
-      return $this->evalWorker->_evalInScope('return ' . $info->text . ';', $scope);
+      list($response, $result) = @$this->evalWorker->_forkAndEval('return ' . $info->text . ';', $scope);
+      if ($response !== EvalWorker::DONE) return NULL;
+      return $result;
     }
   }
 

@@ -117,7 +117,7 @@ class EvalWorker {
       switch ($input->operation) {
       case 'evaluate':
         /* Expression evaluation */
-        $__response = $this->_doEval($input->statement, $__scope);
+        $__response = $this->_evalAndPrint($input->statement, $__scope);
         break;
 
       case 'complete':
@@ -192,7 +192,18 @@ class EvalWorker {
     return get_defined_vars();
   }
 
-  private function _doEval($__input, &$__scope) {
+  private function _evalAndPrint($input, &$scope) {
+    list($response, $result) = $this->_forkAndEval($input, $scope);
+    
+    if (preg_match('/\s*return\b/i', $input)) {
+      fwrite(STDOUT, sprintf(" → %s\n", $this->_inspector->inspect($result)));
+    }
+
+    return $response;
+  }
+
+  public function _forkAndEval($__input, &$__scope) {
+    $__result = NULL;
     $__response = self::DONE;
 
     $this->_ppid = posix_getpid();
@@ -229,23 +240,19 @@ class EvalWorker {
         // (totally valid, but we don't want that child to loop and wait for input)
         exit(0);
       }
-
-      if (preg_match('/\s*return\b/i', $__input)) {
-        fwrite(STDOUT, sprintf(" → %s\n", $this->_inspector->inspect($__result)));
-      }
       $this->_expungeOldWorker();
     }
-    return $__response;
+    return array($__response, $__result);
   }
 
-  public function _evalInScope($__boris_code, &$__boris_scope) {
-    extract($__boris_scope);
-    $__boris_result = eval($__boris_code);
-    $__boris_scope = array_diff_key(get_defined_vars(), array(
-      '__boris_code' => 1,
-      '__boris_scope' => 1,
-      '__boris_result' => 1));
-    return $__boris_result;
+  public function _evalInScope($__input, &$__scope) {
+    extract($__scope);
+    $__result = eval($__input);
+    $__scope = array_diff_key(get_defined_vars(), array(
+      '__input' => 1,
+      '__scope' => 1,
+      '__result' => 1));
+    return $__result;
   }
 
   private function _expungeOldWorker() {
