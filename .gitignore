@@ -5,3 +5,5 @@ boris.phar
 /tests/_*
 /.dir-locals.el
 /elisp/boris-completion.elc
+/lib/Boris/#Completer.php#
+/lib/Boris/.#Completer.php

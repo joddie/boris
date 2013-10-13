@@ -3,7 +3,7 @@
 ;; Copyright (C) 2013 joddie <jonxfield@gmail.com>
 
 ;; Author: joddie
-;; Version: 0.17
+;; Version: 0.21
 ;; Keywords: php, repl, boris
 
 ;; This file is NOT part of GNU Emacs.
@@ -84,10 +84,15 @@
   (set-process-filter boris-process 'boris-filter)
   (message "Connecting to Boris on port 8015... done."))
 
-(defun boris-require-connection ()
-  (unless (and boris-process (process-live-p boris-process))
-    (boris-connect))
-  (and boris-process (process-live-p boris-process)))
+(defun boris-connected-p (&optional silent-p)
+  (if (and boris-process (process-live-p boris-process))
+      t
+    (unless silent-p
+      (let ((comint-process (get-process php-boris-process-name)))
+        (if (and comint-process (process-live-p comint-process))
+            (message "Boris running but not connected. Use M-x boris-connect to connect.")
+          (message "Boris not running. Use M-x boris-connect to start."))))
+    nil))
 
 (defun boris-call (data)
   (setq boris-response nil
@@ -152,13 +157,17 @@
 
 ;;;###autoload
 (defun boris-completion-at-point ()
-  (when (boris-require-connection)
+  (when (boris-connected-p)
     (let* ((line (buffer-substring-no-properties (point-at-bol) (point)))
            (evaluate-p (eq major-mode 'php-boris-mode))
            (response (boris-call `((operation . complete)
                                    (line . ,line)
                                    (evaluate . ,evaluate-p)))))
       (when (and response (gethash "completions" response))
+        ;; Display a message only in php-mode buffers, not in the
+        ;; boris-repl buffer (which would be redundant)
+        (unless (eq major-mode 'php-boris-mode)
+          (message "Completing using Boris REPL"))
         (list
          (+ (point-at-bol) (gethash "start" response))
          (+ (point-at-bol) (gethash "end" response))
@@ -166,8 +175,7 @@
 
 ;;;###autoload
 (defun boris-eldoc-function ()
-  (when (boris-require-connection)
-    ;; fixme
+  (when (boris-connected-p 'silent)
     (let ((line (buffer-substring-no-properties (point-at-bol) (point)))
           (evaluate-p (eq major-mode 'php-boris-mode)))
       (boris-call `((operation . hint)
@@ -236,9 +244,9 @@
   (eldoc-add-command 'completion-at-point)
   (set (make-local-variable 'completion-at-point-functions)
        '(boris-completion-at-point t))
-  ;; (add-hook 'completion-at-point-functions
-  ;;           'boris-completion-at-point nil t)
-  )
+
+  (when (boris-connected-p)
+    (message "Connected to Boris REPL.")))
 
 (defun boris-load-file (file-name)
   (interactive (list (buffer-file-name)))
@@ -260,7 +268,10 @@
     :type '(repeat string))
   
   (defun php-boris ()
-    "Run boris REPL (Hacked version to demo completion code)."
+    "Run Boris REPL with network hacks for completion and Eldoc.
+
+The exact command to run is determined by the variables
+`php-boris-command' and `php-boris-args'."
     (interactive)
     (setq php-boris-prompt-re
           (format php-boris-prompt-re-format php-boris-prompt php-boris-prompt))
@@ -272,7 +283,7 @@
   (add-hook 'php-boris-mode-hook 'boris-php-boris-mode-hook)
   
   (define-key php-boris-mode-map (kbd "C-c C-d") 'boris-get-documentation)
-  (define-key php-boris-mode-map (kbd "C-c d") 'boris-get-documentation)
+  (define-key php-boris-mode-map (kbd "C-c d")   'boris-get-documentation)
   (define-key php-boris-mode-map (kbd "C-c C-/") 'boris-get-documentation)
   (define-key php-boris-mode-map (kbd "C-c C-z") 'php-boris))
 
