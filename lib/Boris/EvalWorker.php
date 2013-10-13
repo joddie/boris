@@ -287,7 +287,7 @@ class EvalWorker {
     $write = NULL;
     $read = $except = $sockets;
 
-    if (stream_select($read, $write, $except, 10) > 0) {
+    if ($this->_select($read, $except) > 0) {
       if ($read) {
         foreach ($read as $reader) {
           if($reader === $this->_server_socket) {
@@ -323,4 +323,11 @@ class EvalWorker {
     }
   }
 
+  private function _select(&$read, &$except) {
+    $write = null;
+    set_error_handler(function(){return true;}, E_WARNING);
+    $result = stream_select($read, $write, $except, 10);
+    restore_error_handler();
+    return $result;
+  }
 }
