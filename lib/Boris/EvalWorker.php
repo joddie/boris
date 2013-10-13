@@ -18,6 +18,7 @@ class EvalWorker {
 
   private $_socket;
   private $_server_socket;
+  private $_buffers = array();
   private $_clients = array();
   private $_exports = array();
   private $_startHooks = array();
@@ -38,6 +39,8 @@ class EvalWorker {
     $this->_socket    = $socket;
     $this->_inspector = new DumpInspector();
     stream_set_blocking($socket, 0);
+
+    $this->_buffers[(int) $this->_socket] = '';
 
     if(!empty($port)) {
       $this->_server_socket = stream_socket_server("tcp://127.0.0.1:$port", $errno, $errstr);
@@ -279,7 +282,7 @@ class EvalWorker {
 
   private function _read($socket)
   {
-    $sockets = $this->_clients;
+    $sockets = array_values($this->_clients);
     $sockets[] = $socket;
     if($this->_server_socket)
       $sockets[] = $this->_server_socket;
@@ -292,27 +295,36 @@ class EvalWorker {
         foreach ($read as $reader) {
           if($reader === $this->_server_socket) {
             $client = stream_socket_accept($this->_server_socket);
-            $this->_clients[] = $client;
+            $id = (int) $client;
+            $this->_clients[$id] = $client;
+            $this->_buffers[$id] = '';
           } else {
-            $length_packed = stream_socket_recvfrom($reader, 4, STREAM_PEEK);
-            if(!strlen($length_packed)) {
+            $id = (int) $reader;
+            $data = stream_socket_recvfrom($reader, 4096);
+            if(!strlen($data)) {
               /* Client disconnected */
-              $this->_clients = array_diff($this->_clients, array($reader));
-            } elseif(strlen($length_packed) < 4) {
-              /* Incomplete length header: leave it in the buffer for
-               * next time */
-              continue;
+              unset($this->_clients[$id]);
+              unset($this->_buffers[$id]);
             } else {
-              $unpacked = unpack('N', $length_packed);
-              $length = 4 + $unpacked[1];
-              $message = stream_socket_recvfrom($reader, $length, STREAM_PEEK);
-              if(strlen($message) != $length) {
-                /* Incomplete message: leave it for next time */
+              $this->_buffers[$id] .= $data;
+              $buf =& $this->_buffers[$id];
+
+              if (strlen($buf) < 4) {
+                /* Incomplete length header */
                 continue;
               }
-              stream_socket_recvfrom($reader, $length);
-              $serialized = substr($message, 4);
+
+              $unpacked = unpack('N', $buf);
+              $length = 4 + $unpacked[1];
+
+              if (strlen($buf) < $length) {
+                /* Incomplete message  */
+                continue;
+              }
+
+              $serialized = substr($buf, 4);
               $unserialized = json_decode($serialized);
+              $buf = substr($buf, $length);
               return array($unserialized, $reader);
             }
           }
