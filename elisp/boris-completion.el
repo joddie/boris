@@ -3,7 +3,7 @@
 ;; Copyright (C) 2013 joddie <jonxfield@gmail.com>
 
 ;; Author: joddie
-;; Version: 0.21
+;; Version: 0.23
 ;; Keywords: php, repl, boris
 
 ;; This file is NOT part of GNU Emacs.
@@ -40,6 +40,7 @@
 (require 'php-boris)
 (require 'bindat)
 (require 'json)
+(require 'eldoc)
 
 (defvar boris-process nil)
 (defvar boris-buffer nil)
@@ -223,17 +224,18 @@
 
 ;;;###autoload
 (defun boris-setup-php-mode ()
-  (define-key php-mode-map (kbd "C-c C-z")
-    (lambda ()
-      (interactive)
-      (if (process-live-p php-boris-process-name)
-          (pop-to-buffer (process-buffer
-                          (get-process php-boris-process-name)))
-        (php-boris))))
-  (define-key php-mode-map (kbd "C-c d") 'boris-get-documentation)
+  (define-key php-mode-map (kbd "C-c C-z") 'boris-pop-to-repl)
+  (define-key php-mode-map (kbd "C-c d")   'boris-get-documentation)
   (define-key php-mode-map (kbd "C-c C-/") 'boris-get-documentation)
   (define-key php-mode-map (kbd "C-c C-k") 'boris-load-file)
   (add-hook 'php-mode-hook 'boris-php-mode-hook))
+
+(defun boris-pop-to-repl ()
+  (interactive)
+  (if (process-live-p php-boris-process-name)
+      (pop-to-buffer (process-buffer
+                      (get-process php-boris-process-name)))
+    (php-boris)))
 
 (defun boris-php-mode-hook ()
   (setq boris-original-php-eldoc-function
