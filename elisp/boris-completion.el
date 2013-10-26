@@ -48,7 +48,7 @@
 (defvar boris-response nil)
 (defvar boris-response-flag nil)
 
-(defvar boris-original-php-eldoc-function nil)
+(defvar boris-original-eldoc-function nil)
 
 (defconst boris-request-format
   '((:length long)
@@ -238,14 +238,12 @@
     (php-boris)))
 
 (defun boris-php-mode-hook ()
-  (setq boris-original-php-eldoc-function
-        eldoc-documentation-function)
+  (setq boris-original-eldoc-function eldoc-documentation-function)
   (set (make-local-variable 'eldoc-documentation-function)
        'boris-eldoc-function)
   (eldoc-mode +1)
   (eldoc-add-command 'completion-at-point)
-  (set (make-local-variable 'completion-at-point-functions)
-       '(boris-completion-at-point t))
+  (add-hook 'completion-at-point-functions 'boris-completion-at-point nil t)
 
   (when (boris-connected-p)
     (message "Connected to Boris REPL.")))
