@@ -47,6 +47,7 @@
 
 (defvar boris-response nil)
 (defvar boris-response-flag nil)
+(defvar boris-async-callback nil)
 
 (defvar boris-original-eldoc-function nil)
 
@@ -95,17 +96,18 @@
           (message "Boris not running. Use M-x boris-connect to start."))))
     nil))
 
-(defun boris-call (data)
+
+(defun boris-call (data &optional callback)
   (setq boris-response nil
         boris-response-flag nil)
   (process-send-string boris-process (boris-pack-request data))
-  (let ((start-time (float-time)))
-    (while (and (not boris-response-flag)
-                (< (- (float-time) start-time) boris-timeout))
-      (accept-process-output boris-process 0 100 t)))
-  (unless boris-response-flag
-    (message "Boris response timeout."))
-  boris-response)
+  (if callback
+      (setq boris-async-callback callback)
+    (accept-process-output boris-process boris-timeout)
+    (if boris-response-flag
+        boris-response
+      (message "Boris response timeout.")
+      nil)))
 
 (defvar boris-response-code-regexp
   (rx-to-string '(any 0 1 2 3 4)))
@@ -146,8 +148,12 @@
                  (read-chars
                   (bindat-length boris-response-format unpacked)))
             (delete-region (point-min) (+ (point-min) read-chars))
-            (setq boris-response response
-                  boris-response-flag t)))))))
+            (if boris-async-callback
+                (progn
+                  (funcall boris-async-callback response)
+                  (setq boris-async-callback nil))
+              (setq boris-response response
+                    boris-response-flag t))))))))
 
 (defun boris-pack-request (data)
   (let* ((json (json-encode data))
@@ -176,12 +182,19 @@
 
 ;;;###autoload
 (defun boris-eldoc-function ()
-  (when (boris-connected-p 'silent)
-    (let ((line (buffer-substring-no-properties (point-at-bol) (point)))
-          (evaluate-p (eq major-mode 'php-boris-mode)))
-      (boris-call `((operation . hint)
-                    (line . ,line)
-                    (evaluate . ,evaluate-p))))))
+  (or (and (functionp boris-original-eldoc-function)
+           (funcall boris-original-eldoc-function))
+      (when (boris-connected-p 'silent)
+        (let ((line (buffer-substring-no-properties (point-at-bol) (point)))
+              (evaluate-p (eq major-mode 'php-boris-mode)))
+          (boris-call `((operation . hint)
+                        (line . ,line)
+                        (evaluate . ,evaluate-p))
+                      #'boris-eldoc-callback)
+          nil))))
+
+(defun boris-eldoc-callback (response)
+  (message "%s" response))
 
 ;;;###autoload
 (defun boris-get-documentation ()
