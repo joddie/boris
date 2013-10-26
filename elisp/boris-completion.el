@@ -3,7 +3,7 @@
 ;; Copyright (C) 2013 joddie <jonxfield@gmail.com>
 
 ;; Author: joddie
-;; Version: 0.23
+;; Version: 0.24
 ;; Keywords: php, repl, boris
 
 ;; This file is NOT part of GNU Emacs.
@@ -92,8 +92,12 @@
     (unless silent-p
       (let ((comint-process (get-process php-boris-process-name)))
         (if (and comint-process (process-live-p comint-process))
-            (message "Boris running but not connected. Use M-x boris-connect to connect.")
-          (message "Boris not running. Use M-x boris-connect to start."))))
+            (if (y-or-n-p "Connect to Boris REPL?")
+                (boris-connect)
+              (message "Use M-x boris-connect to connect."))
+          (if (y-or-n-p "Start Boris REPL?")
+              (php-boris)
+            (message "Use M-x php-boris to start.")))))
     nil))
 
 
@@ -237,13 +241,14 @@
 
 ;;;###autoload
 (defun boris-setup-php-mode ()
-  (define-key php-mode-map (kbd "C-c C-z") 'boris-pop-to-repl)
-  (define-key php-mode-map (kbd "C-c d")   'boris-get-documentation)
+  (define-key php-mode-map (kbd "C-c C-z")
+    'boris-open-or-pop-to-repl)
+  (define-key php-mode-map (kbd "C-c d") 'boris-get-documentation)
   (define-key php-mode-map (kbd "C-c C-/") 'boris-get-documentation)
   (define-key php-mode-map (kbd "C-c C-k") 'boris-load-file)
   (add-hook 'php-mode-hook 'boris-php-mode-hook))
 
-(defun boris-pop-to-repl ()
+(defun boris-open-or-pop-to-repl ()
   (interactive)
   (if (process-live-p php-boris-process-name)
       (pop-to-buffer (process-buffer
