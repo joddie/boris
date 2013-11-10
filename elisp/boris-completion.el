@@ -3,7 +3,7 @@
 ;; Copyright (C) 2013 joddie <jonxfield@gmail.com>
 
 ;; Author: joddie
-;; Version: 0.24
+;; Version: 0.26
 ;; Keywords: php, repl, boris
 
 ;; This file is NOT part of GNU Emacs.
@@ -86,20 +86,21 @@
   (set-process-filter boris-process 'boris-filter)
   (message "Connecting to Boris on port 8015... done."))
 
-(defun boris-connected-p (&optional silent-p)
-  (if (and boris-process (process-live-p boris-process))
-      t
-    (unless silent-p
-      (let ((comint-process (get-process php-boris-process-name)))
-        (if (and comint-process (process-live-p comint-process))
-            (if (y-or-n-p "Connect to Boris REPL?")
-                (boris-connect)
-              (message "Use M-x boris-connect to connect."))
-          (if (y-or-n-p "Start Boris REPL?")
-              (php-boris)
-            (message "Use M-x php-boris to start.")))))
-    nil))
+(defun boris-connected-p ()
+  (and boris-process (process-live-p boris-process)))
 
+(defun boris-prompt-for-connection ()
+  (if (boris-connected-p)
+      t
+    (let ((comint-process (get-process php-boris-process-name)))
+      (if (and comint-process (process-live-p comint-process))
+          (if (y-or-n-p "Connect to Boris REPL?")
+              (boris-connect)
+            (message "Use M-x boris-connect to connect."))
+        (if (y-or-n-p "Start Boris REPL?")
+            (php-boris)
+          (message "Use M-x php-boris to start."))))
+    (boris-connected-p)))
 
 (defun boris-call (data &optional callback)
   (setq boris-response nil
@@ -168,7 +169,7 @@
 
 ;;;###autoload
 (defun boris-completion-at-point ()
-  (when (boris-connected-p)
+  (when (boris-prompt-for-connection)
     (let* ((line (buffer-substring-no-properties (point-at-bol) (point)))
            (evaluate-p (eq major-mode 'php-boris-mode))
            (response (boris-call `((operation . complete)
@@ -188,7 +189,7 @@
 (defun boris-eldoc-function ()
   (or (and (functionp boris-original-eldoc-function)
            (funcall boris-original-eldoc-function))
-      (when (boris-connected-p 'silent)
+      (when (boris-connected-p)
         (let ((line (buffer-substring-no-properties (point-at-bol) (point)))
               (evaluate-p (eq major-mode 'php-boris-mode)))
           (boris-call `((operation . hint)
@@ -263,8 +264,9 @@
   (eldoc-add-command 'completion-at-point)
   (add-hook 'completion-at-point-functions 'boris-completion-at-point nil t)
 
-  (when (boris-connected-p)
-    (message "Connected to Boris REPL.")))
+  (if (boris-connected-p)
+      (message "Connected to Boris REPL.")
+    (message "Use M-x php-boris to start Boris REPL.")))
 
 (defun boris-load-file (file-name)
   (interactive (list (buffer-file-name)))
