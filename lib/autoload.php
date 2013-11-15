@@ -15,4 +15,4 @@ spl_autoload_register(function($class) {
   if (is_file($path)) {
     require_once($path);
   }
-});
+}, true, true);
