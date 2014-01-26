@@ -1,6 +1,18 @@
-# Boris: A tiny little, but robust REPL for PHP
+# Boris
 
-![Demo](http://dl.dropbox.com/u/508607/BorisDemo-v3.gif "Quick Demo")
+A tiny, but robust REPL for PHP.
+
+<a href="http://flattr.com/thing/1327825/d11wtqboris-on-GitHub"
+   target="_blank">
+  <img src="http://api.flattr.com/button/flattr-badge-large.png"
+       alt="Flattr this"
+       valign="middle"
+       title="Flattr this"
+       border="0" />
+</a> — I'm experimenting using this project to raise funds for a new windsurf
+board. More info [here](#help-me-get-a-new-windsurfing-board).
+
+![Demo](http://dl.dropbox.com/u/508607/BorisDemo-v4.gif "Quick Demo")
 
 Python has one. Ruby has one. Clojure has one. Now PHP has one too. Boris is
 PHP's missing REPL (read-eval-print loop), allowing developers to experiment
@@ -19,15 +31,36 @@ PHP's lack of a real REPL to be frustrating and was not able to find an existing
 implementation that was complete.  Boris weighs in at a few hundred lines of
 fairly straightforward code.
 
-## Usage
+## Installation
 
-Boris is available via [Packagist](https://packagist.org/packages/d11wtq/boris), or you can use it directly from this repo:
+### 1. As a pre-built phar file
+
+Boris is available for download as a Phar archive:
+
+  - https://github.com/d11wtq/boris/releases/download/v1.0.8/boris.phar
+
+Simply download it and run it.
+
+    curl -O https://github.com/d11wtq/boris/releases/download/v1.0.8/boris.phar
+    chmod +x boris.phar
+    ./boris.phar
+
+### 2. Via packagist
+
+For use with composer.
+
+  - https://packagist.org/packages/d11wtq/boris
+
+### 3. Directly from this repo
+
+This is great if you want to stay really up-to-date. I don't commit unstable
+code to master, ever.
 
     git clone git://github.com/d11wtq/boris.git
     cd boris
     ./bin/boris
 
-**Pro Tip**: Add boris to your $PATH for easy access.
+### 4. Build your own phar
 
 You can also build a PHAR file using [Box](http://box-project.org/):
 
@@ -36,8 +69,14 @@ You can also build a PHAR file using [Box](http://box-project.org/):
 This will create a `boris.phar` file. Feel free to move it into your bin
 directory:
 
+    chmod +x boris.phar
     mv boris.phar /usr/local/bin/boris
-    chmod +x /usr/local/bin/boris
+
+### Pro Tip
+
+Add boris to your $PATH for easy access.
+
+## Usage
 
 When Boris starts, you will be at the `boris>` prompt. PHP code you enter at
 this prompt is evaluated.  If an expression spans multiple lines, Boris will
@@ -277,3 +316,48 @@ features (the code is almost entirely dependant on POSIX).
 
 Boris is written and maintained by Chris Corbyn (@d11wtq). You can use the
 code as you see fit. See the LICENSE file for details.
+
+## Help me get a new windsurfing board
+
+If you use Boris, and you want to show your appreciation for the hard work that
+goes into making it, you might like to donate towards something I do for fun
+in my spare time—windsurfing! I recently took up the sport and have a good set
+of beginner equipment I use, but I'm preparing to move onto a more advanced
+board to learn some more advanced techniques, like planing and carve gybing.
+
+Windsurfing equipment is quite expensive, though I'll be honest, I can afford
+to pay for most of the gear myself. However it would be awesome if the open
+source work I do could in some way contribute towards my "away from the
+computer" fun.
+
+<img src="http://i.imgur.com/LgHKpWg.jpg" align="center" alt="Tabou Rocket" />
+
+Of course, in return for any hugely gratefully received donations, I will make
+a commitment to improve Boris. Now that things have largely stablized with the
+code base, that will initially come in the form of a rewrite that aims to
+satisfy some of the feature requests currently outstanding, like intelligent
+tab-completion, a pluggable API and the ability to use Boris over a network
+connection/socket. The primary focus will be on improving the communication
+layer between the user interface of Boris (readline) and the REPL backend
+itself.
+
+The board I'm looking to get is the one pictured above. It's a Tabou Rocket,
+which is a very good board and retails at just under AUD $2300 in Australia.
+
+If you'd like to help get me out and sailing that nice-looking piece of
+equipment, in return for improving Boris, you can send a few bucks my way by
+Flattring me.
+
+<a href="http://flattr.com/thing/1327825/d11wtqboris-on-GitHub"
+   target="_blank">
+  <img src="http://api.flattr.com/button/flattr-badge-large.png"
+       alt="Flattr this"
+       title="Flattr this"
+       border="0" />
+</a>
+
+You basically just add some funds to your Flattr account, then Flattr this
+project and anything else you want to distribute those funds over. I receive
+whatever share of funds you gave me at the end of the month.
+
+Hey, by the way, **you rock!**

@@ -196,6 +196,7 @@ class EvalWorker {
   }
 
   private function _evalAndPrint($input, &$scope) {
+    $input = $this->_transform($input);
     list($response, $result) = $this->_forkAndEval($input, $scope);
     
     if (preg_match('/\s*return\b/i', $input)) {
@@ -341,5 +342,21 @@ class EvalWorker {
     $result = stream_select($read, $write, $except, 10);
     restore_error_handler();
     return $result;
+  }
+
+  private function _transform($input) {
+    if ($input === null) {
+      return null;
+    }
+
+    $transforms = array(
+      'exit' => 'exit(0)'
+    );
+
+    foreach ($transforms as $from => $to) {
+      $input = preg_replace('/^\s*' . preg_quote($from, '/') . '\s*;?\s*$/', $to . ';', $input);
+    }
+
+    return $input;
   }
 }
