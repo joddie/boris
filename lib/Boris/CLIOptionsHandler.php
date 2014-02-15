@@ -86,6 +86,8 @@ Options:
   -h, --help     show this help message and exit
   -r, --require  a comma-separated list of files to require on startup
   -v, --version  show Boris version
+  -l, --listen [port]
+                 listen for connections on the given port (default 8015)
 
 USAGE;
     exit(0);
