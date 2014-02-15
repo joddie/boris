@@ -3,7 +3,7 @@
 ;; Copyright (C) 2013 joddie <jonxfield@gmail.com>
 
 ;; Author: joddie
-;; Version: 0.29
+;; Version: 0.31
 ;; Keywords: php, repl, boris
 
 ;; This file is NOT part of GNU Emacs.
@@ -30,22 +30,57 @@
 (require 'json)
 (require 'eldoc)
 
+;;; Customization options
+;;;###autoload
+(defgroup boris nil
+  "PHP Boris REPL with smart completion."
+  :group 'php)
+
 ;;;###autoload
 (defcustom boris-command "boris"
-  "boris program"
+  "Boris executable"
   :group 'boris
   :type 'string)
 
 ;;;###autoload
 (defcustom boris-args '("-l")
-  "command-line arguments for boris"
+  "Command-line arguments to use when starting Boris."
   :group 'boris
   :type '(repeat string))
 
+;;;###autoload
+(defcustom boris-connect-on-repl-start t
+  "When non-nil, connect to Boris for smart completions on starting the REPL."
+  :group 'boris
+  :type 'boolean)
 
-(defvar boris-process-name "boris")
-(defvar boris-process nil)
-(defvar boris-buffer nil)
+;;;###autoload
+(defcustom boris-port 8015
+  "Default port to use when connecting to Boris."
+  :group 'boris
+  :type 'integer)
+
+;;;###autoload
+(defcustom boris-start-timeout 5
+  "Seconds to allow for Boris to start up before giving up."
+  :group 'boris)
+
+
+;;; Internal variables
+(defvar boris-comint-process-name "boris"
+  "Name of the Boris comint process")
+(defvar boris-comint-process nil
+  "Comint process for Boris.")
+(defvar boris-comint-process-buffer nil
+  "Comint buffer for Boris.")
+
+(defvar boris-process-name "boris-connection"
+  "Process name of the Boris side-channel connection")
+(defvar boris-process nil
+  "Process object representing the side-channel connection to Boris.")
+(defvar boris-buffer nil
+  "Buffer for processing messages from the side-channel connection to Boris.")
+(defvar boris-connect-timer nil)
 
 (defvar boris-response nil)
 (defvar boris-response-flag nil)
@@ -64,44 +99,53 @@
 
 (defvar boris-timeout 0.5)
 
-
 ;;;###autoload
 (defun boris-connect ()
   (interactive)
   
-  (unless (process-live-p boris-process-name)
+  (unless (boris-comint-running-p)
     (message "Starting Boris...")
     (save-window-excursion (boris))
     (message "Done.")
     (sleep-for 0.1))
 
-  (message "Connecting to Boris on port 8015...")
+  (message "Connecting to Boris on port %d..." boris-port)
   (when boris-process (delete-process boris-process))
   (when boris-buffer (kill-buffer boris-buffer))
   (setq boris-buffer (get-buffer-create " *boris connection*"))
   (with-current-buffer boris-buffer (set-buffer-multibyte nil))
-  (setq boris-process
-        (open-network-stream
-         "boris" boris-buffer "127.0.0.1" 8015))
-  (set-process-coding-system boris-process 'binary 'binary)
-  (set-process-query-on-exit-flag boris-process nil)
-  (set-process-filter boris-process 'boris-filter)
-  (message "Connecting to Boris on port 8015... done."))
+  (condition-case error-data
+      (progn
+        (setq boris-process
+              (open-network-stream boris-process-name boris-buffer
+                                   "127.0.0.1" boris-port))
+        (set-process-coding-system boris-process 'binary 'binary)
+        (set-process-query-on-exit-flag boris-process nil)
+        (set-process-filter boris-process 'boris-filter)
+        (message "Connecting to Boris on port %d... done." boris-port))
+    (file-error
+     (let ((details (caddr error-data)))
+       (message "Connecting to Boris on port %d failed: %s" boris-port details)
+       (kill-buffer boris-buffer)
+       (setq boris-process nil
+             boris-buffer nil)))))
 
 (defun boris-connected-p ()
   (and boris-process (process-live-p boris-process)))
 
+(defun boris-comint-running-p ()
+  (and boris-comint-process (process-live-p boris-comint-process)))
+
 (defun boris-prompt-for-connection ()
   (if (boris-connected-p)
       t
-    (let ((comint-process (get-process boris-process-name)))
-      (if (and comint-process (process-live-p comint-process))
-          (if (y-or-n-p "Connect to Boris REPL?")
-              (boris-connect)
-            (message "Use M-x boris-connect to connect."))
-        (if (y-or-n-p "Start Boris REPL?")
-            (boris)
-          (message "Use M-x boris to start."))))
+    (if (boris-comint-running-p)
+        (if (y-or-n-p "Connect to Boris REPL?")
+            (boris-connect)
+          (message "Use M-x boris-connect to connect."))
+      (if (y-or-n-p "Start Boris REPL?")
+          (boris)
+        (message "Use M-x boris to start.")))
     (boris-connected-p)))
 
 (defun boris-call (data &optional callback)
@@ -244,18 +288,16 @@
 
 ;;;###autoload
 (defun boris-setup-php-mode ()
-  (define-key php-mode-map (kbd "C-c C-z")
-    'boris-open-or-pop-to-repl)
-  (define-key php-mode-map (kbd "C-c d") 'boris-get-documentation)
+  (define-key php-mode-map (kbd "C-c C-z") 'boris-open-or-pop-to-repl)
+  (define-key php-mode-map (kbd "C-c d")   'boris-get-documentation)
   (define-key php-mode-map (kbd "C-c C-/") 'boris-get-documentation)
   (define-key php-mode-map (kbd "C-c C-k") 'boris-load-file)
   (add-hook 'php-mode-hook 'boris-php-mode-hook))
 
 (defun boris-open-or-pop-to-repl ()
   (interactive)
-  (if (process-live-p boris-process-name)
-      (pop-to-buffer (process-buffer
-                      (get-process boris-process-name)))
+  (if (boris-comint-running-p)
+      (pop-to-buffer (process-buffer boris-comint-process))
     (boris)))
 
 (defun boris-php-mode-hook ()
@@ -272,10 +314,10 @@
 
 (defun boris-load-file (file-name)
   (interactive (list (buffer-file-name)))
-  (unless (process-live-p boris-process-name)
+  (unless (boris-comint-running-p)
     (save-window-excursion
       (boris)))
-  (let ((process (get-process boris-process-name)))
+  (let ((process (get-process boris-comint-process)))
     (comint-send-string process
                         (format "require '%s';\n"
                                 (replace-regexp-in-string "'" "\\'" file-name)))
@@ -287,50 +329,91 @@
 
 ;;;###autoload
 (define-derived-mode boris-mode comint-mode "boris REPL"
-  "Less-broken major mode for boris php REPL"
+  "Major mode for Boris PHP REPL with smart completion."
   :syntax-table boris-mode-syntax-table
-  ;; (set (make-local-variable 'font-lock-defaults) '(nil nil t))
+  (set (make-local-variable 'font-lock-defaults) '(nil t t))
 
   ;; delq seems to change global variables if called this phase
   (set (make-local-variable 'comint-dynamic-complete-functions)
        (delete 'comint-dynamic-complete-filename comint-dynamic-complete-functions))
 
+  ;; Completion
   (when (< emacs-major-version 24)
     (add-hook 'comint-dynamic-complete-functions 'completion-at-point
               nil t))
   (set (make-local-variable 'completion-at-point-functions)
        '(boris-completion-at-point))
+
   (set (make-local-variable 'eldoc-documentation-function)
        'boris-eldoc-function)
   (eldoc-add-command 'completion-at-point)
   (eldoc-add-command 'comint-dynamic-complete)
   (eldoc-mode +1))
 
-(defvar boris-mode-syntax-table
-  (let ((st (make-syntax-table)))
-    (c-populate-syntax-table st)
-    (modify-syntax-entry ?$ "_" st)
-    st))
+(defvar boris-mode-syntax-table php-mode-syntax-table)
 
-(defvar boris-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "TAB")     'comint-dynamic-complete)
-    (define-key map (kbd "C-c C-d") 'boris-get-documentation)
-    (define-key map (kbd "C-c d")   'boris-get-documentation)
-    (define-key map (kbd "C-c C-/") 'boris-get-documentation)
-    (define-key map (kbd "C-c C-z") 'boris)
-    map))
+(define-key boris-mode-map (kbd "TAB")
+  (if (< emacs-major-version 24)
+      'comint-dynamic-complete
+    'completion-at-point))
+(define-key boris-mode-map (kbd "C-c C-d") 'boris-get-documentation)
+(define-key boris-mode-map (kbd "C-c d")   'boris-get-documentation)
+(define-key boris-mode-map (kbd "C-c C-/") 'boris-get-documentation)
+(define-key boris-mode-map (kbd "C-c C-z") 'boris)
 
+(defun boris-wait-and-connect (process string)
+  "Wait for Boris to start and connect to the port printed on the first line.
+
+This is installed as a process filter function by `boris'.  It
+passes all process output to the standard `comint-output-filter'
+function."
+  (comint-output-filter process string)
+  (when (string-match "Listening on port \\([0-9]+\\)" string)
+    (setq boris-port (string-to-number (match-string 1 string)))
+    (message "port %d" boris-port)
+    (boris-connect)
+    (when boris-connect-timer
+      (cancel-timer boris-connect-timer)
+      (setq boris-connect-timer nil))
+    (set-process-filter process 'comint-output-filter)))
+
+;;;###autoload
 (defun boris ()
   "Run Boris REPL with network hacks for completion and Eldoc.
 
 The exact command to run is determined by the variables
 `boris-command' and `boris-args'."
   (interactive)
-  (pop-to-buffer
-   (apply 'make-comint boris-process-name boris-command nil
-          boris-args))
-  (boris-mode))
+  
+  (condition-case error-data
+      (let ((new-process-p (not (boris-comint-running-p))))
+        (if new-process-p
+            (message "Starting new Boris REPL.")
+          (message "Boris REPL already running."))
+        (setq boris-comint-process-buffer
+              (apply 'make-comint boris-comint-process-name boris-command nil
+                     boris-args))
+        (setq boris-comint-process
+              (get-buffer-process boris-comint-process-buffer))
+
+        (with-current-buffer boris-comint-process-buffer
+          (boris-mode))
+
+        (pop-to-buffer boris-comint-process-buffer)
+ 
+        ;; Connect side-channel
+        (when (and new-process-p boris-connect-on-repl-start)
+          (setq boris-connect-timer
+                (run-at-time boris-start-timeout nil
+                             (lambda ()
+                               (message "Connection timeout. Try M-x boris-connect."))))
+          (set-process-filter boris-comint-process 'boris-wait-and-connect)))
+
+    ;; Clean up on error
+    (error
+     (setq boris-comint-process-buffer nil)
+     (setq boris-comint-process nil)
+     (signal (car error-data) (cdr error-data)))))
 
 ;;;###autoload
 (defun boris-setup-compilation-mode ()
