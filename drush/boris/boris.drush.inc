@@ -30,31 +30,53 @@ function boris_drush_command() {
 }
 
 function drush_boris() {
-  $which_boris = drush_get_option('boris');
-  if (!$which_boris) {
-    $which_boris = exec('which boris');
-  }
-  $which_boris = is_link($which_boris) ? readlink($which_boris) : $which_boris;
-  if (!($which_boris && is_file($which_boris) && is_readable($which_boris))) {
-    return drush_set_error('NO_SUCH_FILE',
-      dt('Boris executable "@boris" not found or not readable.', array(
-          '@boris' => $which_boris
-        )));
-  }
-
-  $autoload = dirname($which_boris) . '/../lib/autoload.php';
-  require_once $autoload;
-
-  $boris = new \Boris\Boris('drupal> ');
-  $boris->setInspector(new \Boris\ExportInspector());
-  if ($listen = drush_get_option('listen')) {
-    if ($listen === true) {
-      $listen = 8015;
+  if (defined('DRUPAL_ROOT') && !empty($_SERVER["HTTP_HOST"])) {
+    $filename = tempnam('/tmp', 'drush.boris');
+    $code = _drush_boris_startup_template(DRUPAL_ROOT, $_SERVER["HTTP_HOST"]);
+    $ok = file_put_contents($filename, $code);
+    if ($ok === false) {
+      drush_log("Failed to open temporary startup file $filename", 'error');
+      exit(1);
     }
-    drush_log(dt('Listening on port @listen', array('@listen' => $listen)), 'notice');
-    $boris->listenOn($listen);
+    $cmd = "boris --require=$filename";
+  } else {
+    drush_log('No Drupal site found.', 'warning');
+    $cmd = "boris";
   }
 
-  drush_log(dt('Starting Boris...'));
-  $boris->start();
+  // FIXME: The following is lifted directly from drush_core_execute() and will
+  // probably fail with remote site aliases, etc.
+  $args = drush_get_original_cli_args_and_options();
+  for ($x = 0; $x < sizeof($args); $x++) {
+    // escape all args except for command separators.
+    if (!in_array($args[$x], array('&&', '||', ';'))) {
+      $args[$x] = drush_escapeshellarg($args[$x]);
+    }
+  }
+  $cmd .= ' ' . implode(' ', $args);
+
+  drush_shell_proc_open($cmd);
+}
+
+function _drush_boris_startup_template($dir, $url) {
+  $dir = addslashes($dir);
+  $url = addslashes($url);
+
+  return "<?php\n" .  <<<EOF
+  chdir('$dir');
+  define('DRUPAL_ROOT', '$dir');
+
+  require_once '$dir/includes/bootstrap.inc';
+
+  drupal_override_server_variables(array(
+      'url' => '$url',
+    ));
+  drupal_bootstrap(DRUPAL_BOOTSTRAP_FULL);
+
+  // Remove Drupal's exception and error handlers to keep tracebacks
+  restore_exception_handler();
+  restore_error_handler();
+
+  echo "Drupal site '$url' ($dir)\\n\\n";
+EOF;
 }
