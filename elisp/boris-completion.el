@@ -29,6 +29,7 @@
 (require 'bindat)
 (require 'json)
 (require 'eldoc)
+(require 'format-spec)
 
 ;;; Customization options
 ;;;###autoload
