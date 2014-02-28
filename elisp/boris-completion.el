@@ -1,9 +1,9 @@
 ;;; boris-completion.el --- context-sensitive completion hack for boris repl
 
-;; Copyright (C) 2013 joddie <jonxfield@gmail.com>
+;; Copyright (C) 2013-2014 joddie <jonxfield@gmail.com>
 
 ;; Author: joddie
-;; Version: 0.31
+;; Version: 0.32
 ;; Keywords: php, repl, boris
 
 ;; This file is NOT part of GNU Emacs.
