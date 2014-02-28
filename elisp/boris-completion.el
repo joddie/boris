@@ -327,6 +327,10 @@
 
 ;;;; A very simple comint-mode
 
+(defvar boris-command-history nil)
+(defvar boris-remote-host-history nil)
+(defvar boris-remote-command-history nil)
+
 ;;;###autoload
 (define-derived-mode boris-mode comint-mode "boris REPL"
   "Major mode for Boris PHP REPL with smart completion."
@@ -378,12 +382,15 @@ function."
     (set-process-filter process 'comint-output-filter)))
 
 ;;;###autoload
-(defun boris ()
+(defun boris (&optional command)
   "Run Boris REPL with network hacks for completion and Eldoc.
 
 The exact command to run is determined by the variables
 `boris-command' and `boris-args'."
-  (interactive)
+  (interactive
+   (when current-prefix-arg
+     (boris-query-kill-if-running)
+     (list (read-string "Run command: " nil 'boris-command-history))))
   
   (condition-case error-data
       (let ((new-process-p (not (boris-comint-running-p))))
@@ -391,8 +398,16 @@ The exact command to run is determined by the variables
             (message "Starting new Boris REPL.")
           (message "Boris REPL already running."))
         (setq boris-comint-process-buffer
-              (apply 'make-comint boris-comint-process-name boris-command nil
-                     boris-args))
+              (if (stringp command)
+                  ;; Split custom command and run it
+                  (let* ((words (split-string command))
+                         (program (car words))
+                         (arguments (cdr words)))
+                    (apply 'make-comint boris-comint-process-name
+                           program nil arguments))
+                ;; Use the default boris-command & boris-args
+                (apply 'make-comint boris-comint-process-name
+                       boris-command nil boris-args)))
         (setq boris-comint-process
               (get-buffer-process boris-comint-process-buffer))
 
@@ -415,43 +430,37 @@ The exact command to run is determined by the variables
      (setq boris-comint-process nil)
      (signal (car error-data) (cdr error-data)))))
 
-(defvar boris-remote-host-history nil)
-(defvar boris-remote-command-history nil)
-
 ;;;###autoload
-(defun boris-remote (host port command)
-  (interactive
-   (progn
-     (when (boris-comint-running-p)
-       (if (yes-or-no-p "Boris already running. Kill process and start new REPL?")
-           (progn
-             (delete-process boris-comint-process)
-             (when (boris-connected-p)
-               (delete-process boris-process)))
-         (error "Boris already running.")))
-     (let*
-         ((default-host
-           (if (consp boris-remote-host-history)
-               (car boris-remote-host-history)
-             nil))
-          (host-prompt
-           (if default-host
-               (format "Host (default '%s'): " default-host)
-             "Host: "))
-          (host (read-string host-prompt nil 'boris-remote-host-history default-host))
-          (port (read-number "Port: " 8015))
-          (command
-           (read-string "Run command: "
-                        (format-spec
-                         "ssh -t %h -L %p:localhost:%p boris --listen"
-                         `((?h . ,host) (?p . ,port)))
-                        'boris-remote-command-history)))
-       (list host port command))))
-   (let* ((words (split-string command))
-          (boris-command (car words))
-          (boris-args (cdr words)))
-     (boris)))
+(defun boris-remote ()
+  (interactive)
+  (boris-query-kill-if-running)
+  (let*
+      ((default-host
+        (if (consp boris-remote-host-history)
+            (car boris-remote-host-history)
+          nil))
+       (host-prompt
+        (if default-host
+            (format "Host (default '%s'): " default-host)
+          "Host: "))
+       (host (read-string host-prompt nil 'boris-remote-host-history default-host))
+       (port (read-number "Port: " 8015))
+       (command
+        (read-string "Run command: "
+                     (format-spec
+                      "ssh -t %h -L %p:localhost:%p boris --listen"
+                      `((?h . ,host) (?p . ,port)))
+                     'boris-remote-command-history)))
+    (boris command)))
 
+(defun boris-query-kill-if-running ()
+  (when (boris-comint-running-p)
+    (if (yes-or-no-p "Boris already running. Kill process and start new REPL?")
+        (progn
+          (delete-process boris-comint-process)
+          (when (boris-connected-p)
+            (delete-process boris-process)))
+      (error "Boris already running."))))
 
 ;;;###autoload
 (defun boris-setup-compilation-mode ()
