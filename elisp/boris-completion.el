@@ -397,23 +397,36 @@ The exact command to run is determined by the variables
         (if new-process-p
             (message "Starting new Boris REPL.")
           (message "Boris REPL already running."))
-        (setq boris-comint-process-buffer
-              (if (stringp command)
-                  ;; Split custom command and run it
-                  (let* ((words (split-string command))
-                         (program (car words))
-                         (arguments (cdr words)))
-                    (apply 'make-comint boris-comint-process-name
-                           program nil arguments))
-                ;; Use the default boris-command & boris-args
-                (apply 'make-comint boris-comint-process-name
-                       boris-command nil boris-args)))
+
+        (if (null command)
+            ;; Use the default boris-command & boris-args
+            (let ((comint-buffer
+                   (apply 'make-comint boris-comint-process-name
+                          boris-command nil boris-args)))
+              (with-current-buffer comint-buffer (boris-mode))
+              (setq boris-comint-process-buffer comint-buffer))
+
+          ;; Split custom command and run it
+          (let* ((words (split-string command))
+                 (program (car words))
+                 (arguments (cdr words))
+                 (comint-buffer
+                  (apply 'make-comint boris-comint-process-name
+                         program nil arguments)))
+            (with-current-buffer comint-buffer
+              (boris-mode)
+              ;; Save the command and arguments as local variables, so
+              ;; that restarting the REPL via C-c C-z in this buffer
+              ;; will re-run the same command
+              (setq-local boris-command program)
+              (setq-local boris-args arguments))
+            (setq boris-comint-process-buffer comint-buffer)))
+
+        ;; Keep a reference to the comint process
         (setq boris-comint-process
               (get-buffer-process boris-comint-process-buffer))
 
-        (with-current-buffer boris-comint-process-buffer
-          (boris-mode))
-
+        ;; Pop to comint buffer
         (pop-to-buffer boris-comint-process-buffer)
  
         ;; Connect side-channel
