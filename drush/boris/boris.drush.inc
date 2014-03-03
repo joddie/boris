@@ -30,9 +30,22 @@ function boris_drush_command() {
 }
 
 function drush_boris() {
-  if (defined('DRUPAL_ROOT') && !empty($_SERVER["HTTP_HOST"])) {
+  global $base_url;
+
+  if (defined('DRUPAL_ROOT') && !empty($base_url)) {
+    // URLs must begin with 'http://' and end with '/' for
+    // drupal_override_server_variables to parse them correctly and find the
+    // settings.php file
+    $url = $base_url;
+    if (!preg_match('|^http://|', $url)) {
+      $url = "http://$url";
+    }
+    if (!preg_match('|/$|', $url)) {
+      $url = "$url/";
+    }
+
     $filename = tempnam('/tmp', 'drush.boris');
-    $code = _drush_boris_startup_template(DRUPAL_ROOT, $_SERVER["HTTP_HOST"]);
+    $code = _drush_boris_startup_template(DRUPAL_ROOT, $url);
     $ok = file_put_contents($filename, $code);
     if ($ok === false) {
       drush_log("Failed to open temporary startup file $filename", 'error');
@@ -59,12 +72,6 @@ function drush_boris() {
 }
 
 function _drush_boris_startup_template($dir, $url) {
-  // URLs must begin with http:// for drupal_override_server_variables to parse
-  // them correctly and find the settings.php file
-  if (!preg_match('|^http://|', $url)) {
-    $url = "http://$url";
-  }
-
   $dir = addslashes($dir);
   $url = addslashes($url);
 
@@ -77,6 +84,7 @@ function _drush_boris_startup_template($dir, $url) {
   drupal_override_server_variables(array(
       'url' => '$url',
     ));
+
   drupal_bootstrap(DRUPAL_BOOTSTRAP_FULL);
 
   // Remove Drupal's exception and error handlers to keep tracebacks
