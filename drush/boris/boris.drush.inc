@@ -59,6 +59,12 @@ function drush_boris() {
 }
 
 function _drush_boris_startup_template($dir, $url) {
+  // URLs must begin with http:// for drupal_override_server_variables to parse
+  // them correctly and find the settings.php file
+  if (!preg_match('|^http://|', $url)) {
+    $url = "http://$url";
+  }
+
   $dir = addslashes($dir);
   $url = addslashes($url);
 
