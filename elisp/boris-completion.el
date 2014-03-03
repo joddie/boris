@@ -462,7 +462,7 @@ The exact command to run is determined by the variables
        (command
         (read-string "Run command: "
                      (format-spec
-                      "ssh -t %h -L %p:localhost:%p boris --listen"
+                      "ssh -t %h -L %p:localhost:%p boris --listen=%p"
                       `((?h . ,host) (?p . ,port)))
                      'boris-remote-command-history)))
     (boris command)))
