@@ -3,7 +3,7 @@
 ;; Copyright (C) 2013-2014 joddie <jonxfield@gmail.com>
 
 ;; Author: joddie
-;; Version: 0.32
+;; Version: 0.33
 ;; Keywords: php, repl, boris
 
 ;; This file is NOT part of GNU Emacs.
@@ -88,6 +88,9 @@
 (defvar boris-async-callback nil)
 
 (defvar boris-original-eldoc-function nil)
+
+(defvar boris-recent-buffer nil
+  "Buffer active before last invocation of `boris-open-or-pop-to-repl'.")
 
 (defconst boris-request-format
   '((:length long)
@@ -297,6 +300,7 @@
 
 (defun boris-open-or-pop-to-repl ()
   (interactive)
+  (setq boris-recent-buffer (current-buffer))
   (if (boris-comint-running-p)
       (pop-to-buffer (process-buffer boris-comint-process))
     (boris)))
@@ -364,7 +368,7 @@
 (define-key boris-mode-map (kbd "C-c C-d") 'boris-get-documentation)
 (define-key boris-mode-map (kbd "C-c d")   'boris-get-documentation)
 (define-key boris-mode-map (kbd "C-c C-/") 'boris-get-documentation)
-(define-key boris-mode-map (kbd "C-c C-z") 'boris)
+(define-key boris-mode-map (kbd "C-c C-z") 'boris-restart-or-pop-back)
 
 (defun boris-wait-and-connect (process string)
   "Wait for Boris to start and connect to the port printed on the first line.
@@ -466,6 +470,17 @@ The exact command to run is determined by the variables
                       `((?h . ,host) (?p . ,port)))
                      'boris-remote-command-history)))
     (boris command)))
+
+(defun boris-restart-or-pop-back ()
+  (interactive)
+  (if (boris-comint-running-p)
+      ;; Pop to recent buffer
+      (if (and boris-recent-buffer
+               (buffer-live-p boris-recent-buffer))
+          (pop-to-buffer boris-recent-buffer))
+    
+    ;; Not running: try to restart.
+    (boris)))
 
 (defun boris-query-kill-if-running ()
   (when (boris-comint-running-p)
