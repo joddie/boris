@@ -30,6 +30,7 @@
 (require 'json)
 (require 'eldoc)
 (require 'format-spec)
+(require 'cl-lib)
 
 ;;; Customization options
 ;;;###autoload
@@ -240,16 +241,12 @@
   (or (and (functionp boris-original-eldoc-function)
            (funcall boris-original-eldoc-function))
       (when (boris-connected-p)
-        (let ((line (buffer-substring-no-properties (point-at-bol) (point)))
-              (evaluate-p (eq major-mode 'boris-mode)))
-          (boris-call `((operation . hint)
-                        (line . ,line)
-                        (evaluate . ,evaluate-p))
-                      #'boris-eldoc-callback)
-          nil))))
+        (boris--call-for-info 'hint nil #'boris-eldoc-callback)
+        "")))
 
 (defun boris-eldoc-callback (response)
-  (message "%s" response))
+  (when response
+    (message "%s" response)))
 
 ;;;###autoload
 (defun boris-get-documentation ()
@@ -357,7 +354,10 @@
        'boris-eldoc-function)
   (eldoc-add-command 'completion-at-point)
   (eldoc-add-command 'comint-dynamic-complete)
-  (eldoc-mode +1))
+  (eldoc-mode +1)
+
+  (setq-local company-backends '(boris-company))
+  (company-mode 1))
 
 (defvar boris-mode-syntax-table php-mode-syntax-table)
 
@@ -490,6 +490,103 @@ The exact command to run is determined by the variables
           (when (boris-connected-p)
             (delete-process boris-process)))
       (error "Boris already running."))))
+
+
+;;; Company-mode integration
+
+(defun boris-company (command &optional arg &rest ignore)
+  (interactive 'interactive)
+  (when (boris-connected-p)
+    (cl-case command
+      (interactive (company-begin-backend 'boris-company))
+
+      (prefix
+       (let ((response (boris--call-for-completions)))
+         (when response
+           (cl-destructuring-bind (start end _) response
+             (setq boris-hack-completion-beginning start)
+             (let ((prefix (buffer-substring start end))
+                   (show-all-p (looking-back "\\(\\(->\\|::\\)\\s-*\\)\\|new\\s-*\\(\\sw\\|\\s_\\)*")))
+               (cons prefix (or show-all-p (length prefix))))))))
+      
+      (candidates
+       (let ((response (boris--call-for-completions)))
+         (when response
+           (cl-destructuring-bind (_ _ completions) response
+             completions))))
+
+      (meta
+       (boris--call-for-meta arg))
+
+      (annotation
+       (boris--call-for-annotation arg))
+
+      (location
+       (boris--call-for-location arg))
+
+      (doc-buffer
+       (let ((docs
+              (boris--call-for-info 'documentation arg)))
+         (company-doc-buffer docs)))
+
+      (post-completion
+       (message (funcall eldoc-documentation-function)))
+
+      (require-match nil)
+
+      (t nil))))
+
+(defun boris--call-for-completions ()
+  (let* ((beginning-of-line (point-at-bol))
+         (text (buffer-substring-no-properties beginning-of-line (point)))
+         (evaluate-p (eq major-mode 'boris-mode))
+         (response 
+          (boris-call `((operation . complete)
+                        (line . ,text)
+                        (evaluate . ,evaluate-p)))))
+    (when (and response (gethash "completions" response))
+      (list
+       (+ beginning-of-line (gethash "start" response))
+       (+ beginning-of-line (gethash "end" response))
+       (gethash "completions" response)))))
+
+;; This implementation of meta & annotation is inefficient and
+;; ungainly, and should be replaced with something better
+(defun boris--call-for-meta (candidate)
+  (boris--call-for-info 'shortdoc candidate))
+
+(defun boris--call-for-annotation (candidate)
+  (let ((response (boris--call-for-info 'hint candidate)))
+    (when response
+      (substring response (length candidate)))))
+
+(defun boris--call-for-location (candidate)
+  (let ((response (boris--call-for-info 'location candidate)))
+    (when response
+      (cons (gethash "file" response)
+            (gethash "line" response)))))
+
+(defun boris--call-for-info (operation &optional candidate callback)
+  (let* ((beginning-of-line
+          (save-excursion
+            (ignore-errors
+              (backward-up-list))
+            (point-at-bol)))
+         (text
+          (if candidate
+              ;; FIXME: Horrible hack
+              (concat
+               (buffer-substring-no-properties beginning-of-line
+                                               boris-hack-completion-beginning)
+               candidate)
+            (buffer-substring-no-properties beginning-of-line (point))))
+         (evaluate-p (eq major-mode 'boris-mode)))
+    (boris-call `((operation . ,operation)
+                  (line . ,text)
+                  (evaluate . ,evaluate-p))
+                callback)))
+
+
 
 ;;;###autoload
 (defun boris-setup-compilation-mode ()

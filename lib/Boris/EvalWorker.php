@@ -138,6 +138,16 @@ class EvalWorker {
         $__response = $this->_packResponse($return);
         break;
 
+      case 'shortdoc':
+        $return = $this->_completer->getShortDocumentation($input->line, $input->evaluate, $__scope);
+        $__response = $this->_packResponse($return);
+        break;
+
+      case 'location':
+        $return = $this->_completer->getLocation($input->line, $input->evaluate, $__scope);
+        $__response = $this->_packResponse($return);
+        break;
+
       default:
         throw new \RuntimeException(sprintf("Bad operation '%s'", $input->operation));
         $__response = self::DONE;

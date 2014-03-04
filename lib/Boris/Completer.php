@@ -142,6 +142,39 @@ class Completer {
     }
   }
 
+  /**
+   * Return a single-line help string
+   */
+  public function getShortDocumentation($line, $evaluate, $scope) {
+    $doc = $this->getDocumentation($line, $evaluate, $scope);
+    if ($doc) {
+      if (preg_match('|/[*][*]\s*\n\s*[*]\s*(.*)$|m', $doc, $matches)) {
+        return $matches[1];
+      }
+    }
+    return $this->getHint($line, $evaluate, $scope);
+  }
+
+  /**
+   * Return function/method location
+   */
+  public function getLocation($line, $evaluate, $scope) {
+    $info = $this->parser->getDocInfo($line);
+    if(!$info) return NULL;
+    $refl = $this->getReflectionObject($info, $evaluate, $scope);
+    if(!$refl) return NULL;
+    try {
+      return array(
+        'file' => $refl->getFileName(),
+        'line' => $refl->getStartLine()
+      );
+    } catch(\ReflectionException $e) {
+      return NULL;
+    }
+  }
+  
+
+
   /**********************************************************************
    *
    * Private methods for performing completion
