@@ -32,6 +32,12 @@
 (require 'format-spec)
 (require 'cl-lib)
 
+;;; Silence compilation warnings.
+(eval-when-compile
+  (declare-function company-begin-backend "company.el")
+  (declare-function company-doc-buffer "company.el")
+  (defvar company-backends))
+
 ;;; Customization options
 ;;;###autoload
 (defgroup boris nil
@@ -192,7 +198,7 @@
                        garbage)))))
 
       (let ((unpacked
-             (condition-case err
+             (condition-case _
                  (bindat-unpack boris-response-format 
                                 (buffer-substring (point-min) (process-mark proc)))
                (args-out-of-range nil))))
@@ -257,8 +263,7 @@
       (with-help-window "*boris help*"
         (princ docs))
       (with-current-buffer "*boris help*"
-        (let ((inhibit-read-only t)
-              (read-only-mode nil))
+        (let ((inhibit-read-only t))
           (goto-char (point-min))
           (while (re-search-forward
                   "@@ \\(.*\\) \\([0-9]+\\)[[:space:]]*-[[:space:]]*[0-9]+" nil t)
