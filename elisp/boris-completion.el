@@ -73,6 +73,24 @@
   "Seconds to allow for Boris to start up before giving up."
   :group 'boris)
 
+;;;###autoload
+(defface boris-mode-line-run
+    '((default :inherit compilation-mode-line-run))
+  "Face for Boris's mode line indicator when Comint running but no connection."
+  :group 'boris)
+
+;;;###autoload
+(defface boris-mode-line-connected
+  '((default :inherit compilation-mode-line-exit))
+  "Face for Boris's mode line indicator when connected."
+  :group 'boris)
+
+;;;###autoload
+(defface boris-mode-line-disconnected
+  '((default :strike-through t))
+  "Face for Boris's mode line indicator when not connected."
+  :group 'boris)
+
 ;;; Internal variables
 (defvar boris-comint-process-name "boris"
   "Name of the Boris comint process")
@@ -353,7 +371,21 @@
   (when (require 'company nil t)
     (make-local-variable 'company-backends)
     (push #'boris-company company-backends)
-    (company-mode 1)))
+    (company-mode 1))
+
+  (setq-local mode-line-process '(:eval (boris-mode-line-process))))
+
+(defun boris-mode-line-process ()
+  (cond ((boris-connected-p)
+         (propertize "+boris"
+                     'face 'boris-mode-line-connected
+                     'help-echo "Connected to running REPL."))
+        ((boris-comint-running-p)
+         (propertize "-boris" 'face 'boris-mode-line-run
+                     'help-echo "REPL running but not connected."))
+        (t
+         (propertize " boris" 'face 'boris-mode-line-disconnected
+                     'help-echo "No running REPL."))))
 
 (defun boris-load-file (file-name)
   (interactive (list (buffer-file-name)))
