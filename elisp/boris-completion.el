@@ -73,7 +73,6 @@
   "Seconds to allow for Boris to start up before giving up."
   :group 'boris)
 
-
 ;;; Internal variables
 (defvar boris-comint-process-name "boris"
   "Name of the Boris comint process")
@@ -88,25 +87,67 @@
   "Process object representing the side-channel connection to Boris.")
 (defvar boris-buffer nil
   "Buffer for processing messages from the side-channel connection to Boris.")
+
+;; Timer object used to wait and connect the side-channel connection
+;; after starting the Comint process
 (defvar boris-connect-timer nil)
 
-(defvar boris-async-callbacks nil)
-
+;; Previous value of `eldoc-documentation-function' before turning on
+;; Boris mode.  This will be tried first before calling the server,
+;; since it may be faster.
 (defvar boris-original-eldoc-function nil)
 
 (defvar boris-recent-buffer nil
-  "Buffer active before last invocation of `boris-open-or-pop-to-repl'.")
+  "Buffer that was active before last calling `boris-open-or-pop-to-repl'.")
+
+;; The queue of callbacks awaiting a response from the server.
+;; Callbacks are added to the end of the list in `boris-call', removed
+;; from the front of the list and called in `boris-filter' when a
+;; complete response is assembled.
+(defvar boris-async-callbacks nil)
 
 (defconst boris-request-format
+  ;; Byte packing format for requests to the PHP backend:
+  ;; - length of the request data as a long integer (four bytes)
+  ;; - request data encoded as JSON
   '((:length long)
     (:data str (:length))))
 
 (defconst boris-response-format
+  ;; Byte packing format for responses from the PHP backend:
+  ;; - one byte result code (see `boris-response-code-regexp')
+  ;; - four bytes (long integer) specifying response length
+  ;; - response data encoded as JSON
   '((:code str 1)
     (:length long)
     (:data str (:length))))
 
+(defconst boris-response-code-regexp
+  ;; Legal first byte codes in a response from the Boris server
+  ;; connection. See EvalWorker.php. Tooling calls (completion, Eldoc,
+  ;; etc.) should generally begin with 4 (RESPONSE).
+  (rx-to-string
+   '(any
+     0 ; done, OK
+     1 ; exited
+     2 ; failed
+     3 ; ready
+     4 ; response
+     )))
+
+;; Timeout for asynchronous calls, in seconds
 (defvar boris-timeout 0.5)
+
+
+;;;; Side-channel communication for completions, eldoc, doc lookup
+
+;; t when the Comint process is running
+(defun boris-comint-running-p ()
+  (and boris-comint-process (process-live-p boris-comint-process)))
+
+;; t when the side channel is connected 
+(defun boris-connected-p ()
+  (and boris-process (process-live-p boris-process)))
 
 ;;;###autoload
 (defun boris-connect ()
@@ -139,12 +180,6 @@
        (setq boris-process nil
              boris-buffer nil)))))
 
-(defun boris-connected-p ()
-  (and boris-process (process-live-p boris-process)))
-
-(defun boris-comint-running-p ()
-  (and boris-comint-process (process-live-p boris-comint-process)))
-
 (defun boris-prompt-for-connection ()
   (if (boris-connected-p)
       t
@@ -171,8 +206,6 @@
           response
         (message "Boris response timeout.")
         nil))))
-
-  (rx-to-string '(any 0 1 2 3 4)))
 
 (defun boris-filter (proc string)
   (when (buffer-live-p (process-buffer proc))
@@ -286,7 +319,9 @@
     (goto-char (point-min))
     (forward-line (1- line-number))))
 
-;; Hacks to php-mode
+
+;;;; Setup php-mode
+;; TODO: Make a minor mode.
 
 ;;;###autoload
 (defun boris-setup-php-mode ()
@@ -333,7 +368,7 @@
 
 
 
-;;;; A very simple comint-mode
+;;;; A simple comint-mode
 
 (defvar boris-command-history nil)
 (defvar boris-remote-host-history nil)
@@ -355,13 +390,15 @@
               nil t))
   (set (make-local-variable 'completion-at-point-functions)
        '(boris-completion-at-point))
-
+  
+  ;; Eldoc
   (set (make-local-variable 'eldoc-documentation-function)
        'boris-eldoc-function)
   (eldoc-add-command 'completion-at-point)
   (eldoc-add-command 'comint-dynamic-complete)
   (eldoc-mode +1)
 
+  ;; Company-mode
   (when (require 'company nil t)
     (make-local-variable 'company-backends)
     (push #'boris-company company-backends)
@@ -396,10 +433,18 @@ function."
 
 ;;;###autoload
 (defun boris (&optional command)
-  "Run Boris REPL with network hacks for completion and Eldoc.
+  "Run a Boris PHP REPL in a comint buffer with smart completion and Eldoc.
 
-The exact command to run is determined by the variables
-`boris-command' and `boris-args'."
+With prefix argument, prompt for a specific command line to start
+Boris.  Otherwise, the command to run is determined by the
+variables `boris-command' and `boris-args'.  Boris must be
+started with the \"-l\" or \"--listen\" flag to provide smart
+completions, eldoc, jump-to-definition and other features.
+
+If there is already a Boris process running, just switch to its
+buffer, unless called with a prefix argument to run a specific
+command.  In that case, ask before killing the currently running
+process and starting a new one."
   (interactive
    (when current-prefix-arg
      (boris-query-kill-if-running)
@@ -458,6 +503,14 @@ The exact command to run is determined by the variables
 
 ;;;###autoload
 (defun boris-remote ()
+  "Run a remote Boris REPL via SSH.
+
+Prompts for host and side-channel port number, then allows
+editing the SSH command line before running it in a `boris-mode'
+Comint buffer.  Boris must be installed on the remote machine.
+The default command line forwards the remote process side-channel
+connection over SSH, so that smart completion and other features
+work as normal."
   (interactive)
   (boris-query-kill-if-running)
   (let*
@@ -480,6 +533,7 @@ The exact command to run is determined by the variables
     (boris command)))
 
 (defun boris-restart-or-pop-back ()
+  "Switch back to most recent PHP source buffer, or start a new Boris REPL."
   (interactive)
   (if (boris-comint-running-p)
       ;; Pop to recent buffer
