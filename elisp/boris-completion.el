@@ -1,4 +1,4 @@
-;;; boris-completion.el --- context-sensitive completion hack for boris repl
+;;; boris-completion.el --- context-sensitive completion hack for boris repl -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2013-2014 joddie <jonxfield@gmail.com>
 
@@ -84,9 +84,7 @@
   "Buffer for processing messages from the side-channel connection to Boris.")
 (defvar boris-connect-timer nil)
 
-(defvar boris-response nil)
-(defvar boris-response-flag nil)
-(defvar boris-async-callback nil)
+(defvar boris-async-callbacks nil)
 
 (defvar boris-original-eldoc-function nil)
 
@@ -154,18 +152,20 @@
     (boris-connected-p)))
 
 (defun boris-call (data &optional callback)
-  (setq boris-response nil
-        boris-response-flag nil)
-  (process-send-string boris-process (boris-pack-request data))
-  (if callback
-      (setq boris-async-callback callback)
-    (accept-process-output boris-process boris-timeout)
-    (if boris-response-flag
-        boris-response
-      (message "Boris response timeout.")
-      nil)))
+  (let ((response nil) (flag nil))
+    (process-send-string boris-process (boris-pack-request data))
+    (if callback
+        (add-hook 'boris-async-callbacks callback t)
+      (add-hook 'boris-async-callbacks
+            (lambda (received)
+              (setq response received
+                    flag t)) t)
+      (accept-process-output boris-process boris-timeout)
+      (if flag
+          response
+        (message "Boris response timeout.")
+        nil))))
 
-(defvar boris-response-code-regexp
   (rx-to-string '(any 0 1 2 3 4)))
 
 (defun boris-filter (proc string)
@@ -204,12 +204,8 @@
                  (read-chars
                   (bindat-length boris-response-format unpacked)))
             (delete-region (point-min) (+ (point-min) read-chars))
-            (if boris-async-callback
-                (progn
-                  (funcall boris-async-callback response)
-                  (setq boris-async-callback nil))
-              (setq boris-response response
-                    boris-response-flag t))))))))
+            (when boris-async-callbacks
+              (funcall (pop boris-async-callbacks) response))))))))
 
 (defun boris-pack-request (data)
   (let* ((json (json-encode data))
@@ -312,7 +308,12 @@
 
   (if (boris-connected-p)
       (message "Connected to Boris REPL.")
-    (message "Use M-x boris to start Boris REPL.")))
+    (message "Use M-x boris to start Boris REPL."))
+
+  (when (require 'company nil t)
+    (make-local-variable 'company-backends)
+    (push #'boris-company company-backends)
+    (company-mode 1)))
 
 (defun boris-load-file (file-name)
   (interactive (list (buffer-file-name)))
@@ -356,8 +357,10 @@
   (eldoc-add-command 'comint-dynamic-complete)
   (eldoc-mode +1)
 
-  (setq-local company-backends '(boris-company))
-  (company-mode 1))
+  (when (require 'company nil t)
+    (make-local-variable 'company-backends)
+    (push #'boris-company company-backends)
+    (company-mode 1)))
 
 (defvar boris-mode-syntax-table php-mode-syntax-table)
 
@@ -494,7 +497,10 @@ The exact command to run is determined by the variables
 
 ;;; Company-mode integration
 
-(defun boris-company (command &optional arg &rest ignore)
+;; FIXME
+(defvar boris-hack-completion-beginning nil)
+
+(defun boris-company (command &optional arg &rest _ignore)
   (interactive 'interactive)
   (when (boris-connected-p)
     (cl-case command
