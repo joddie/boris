@@ -190,6 +190,7 @@
         (set-process-coding-system boris-process 'binary 'binary)
         (set-process-query-on-exit-flag boris-process nil)
         (set-process-filter boris-process 'boris-filter)
+        (setq boris-async-callbacks nil)
         (message "Connecting to Boris on port %d... done." boris-port))
     (file-error
      (let ((details (caddr error-data)))
