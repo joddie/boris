@@ -283,18 +283,22 @@ class EvalWorker {
 
   private function _read($socket)
   {
+    /* Process any buffered requests before blocking on more data */
+    $pending = $this->_pendingRequest();
+    if ($pending) return $pending;
+
     $sockets = array_values($this->_clients);
     $sockets[] = $socket;
     if($this->_server_socket)
       $sockets[] = $this->_server_socket;
 
-    $write = NULL;
     $read = $except = $sockets;
 
     if ($this->_select($read, $except) > 0) {
       if ($read) {
         foreach ($read as $reader) {
           if($reader === $this->_server_socket) {
+            /* Make a new client connection */
             $client = stream_socket_accept($this->_server_socket);
             $id = (int) $client;
             $this->_clients[$id] = $client;
@@ -302,31 +306,14 @@ class EvalWorker {
           } else {
             $id = (int) $reader;
             $data = stream_socket_recvfrom($reader, 4096);
-            if(!strlen($data)) {
-              /* Client disconnected */
+            if (!strlen($data)) {
+              /* Client disconnected: remove its buffer and socket */
               unset($this->_clients[$id]);
               unset($this->_buffers[$id]);
             } else {
+              /* Received data: append it to the buffer to be
+               * processed on next call to _read */
               $this->_buffers[$id] .= $data;
-              $buf =& $this->_buffers[$id];
-
-              if (strlen($buf) < 4) {
-                /* Incomplete length header */
-                continue;
-              }
-
-              $unpacked = unpack('N', $buf);
-              $length = 4 + $unpacked[1];
-
-              if (strlen($buf) < $length) {
-                /* Incomplete message  */
-                continue;
-              }
-
-              $serialized = substr($buf, 4);
-              $unserialized = json_decode($serialized);
-              $buf = substr($buf, $length);
-              return array($unserialized, $reader);
             }
           }
         }
@@ -334,6 +321,29 @@ class EvalWorker {
         throw new \UnexpectedValueException("Socket error: closed");
       }
     }
+  }
+
+  private function _pendingRequest() {
+    foreach ($this->_buffers as $id => &$buf) {
+      if (strlen($buf) < 4) {
+        /* Empty buffer, or incomplete length header */
+        continue;
+      }
+
+      $unpacked = unpack('N', $buf);
+      $length = 4 + $unpacked[1];
+
+      if (strlen($buf) < $length) {
+        /* Incomplete message  */
+        continue;
+      }
+
+      $serialized = substr($buf, 4);
+      $unserialized = json_decode($serialized);
+      $buf = substr($buf, $length);
+      return array($unserialized, $id == (int) $this->_socket ? $this->_socket : $this->_clients[$id]);
+    }
+    return null;
   }
 
   private function _select(&$read, &$except) {
