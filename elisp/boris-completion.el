@@ -355,7 +355,8 @@
   (setq boris-recent-buffer (current-buffer))
   (if (boris-comint-running-p)
       (pop-to-buffer (process-buffer boris-comint-process))
-    (boris)))
+    ;; call-interactively passes along any prefix argument
+    (call-interactively #'boris)))
 
 (defun boris-php-mode-hook ()
   (setq boris-original-eldoc-function eldoc-documentation-function)
@@ -575,7 +576,7 @@ work as normal."
           (pop-to-buffer boris-recent-buffer))
     
     ;; Not running: try to restart.
-    (boris)))
+    (call-interactively #'boris)))
 
 (defun boris-query-kill-if-running ()
   (when (boris-comint-running-p)
