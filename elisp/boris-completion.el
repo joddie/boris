@@ -282,7 +282,7 @@
                    (args-out-of-range nil))))
             (if (not unpacked)
                 (throw 'done t)
-              (let* ((json-object-type 'hash-table)
+              (let* ((json-object-type 'plist)
                      (json-array-type 'list)
                      (response
                       (json-read-from-string (bindat-get-field unpacked :data)))
@@ -307,22 +307,22 @@
            (response (boris-call `((operation . complete)
                                    (line . ,line)
                                    (evaluate . ,evaluate-p)))))
-      (when (and response (gethash "completions" response))
-        ;; Display a message only in php-mode buffers, not in the
-        ;; boris-repl buffer (which would be redundant)
-        (unless (eq major-mode 'boris-mode)
-          (message "Completing using Boris REPL"))
-        (list
-         (+ (point-at-bol) (gethash "start" response))
-         (+ (point-at-bol) (gethash "end" response))
-         (gethash "completions" response))))))
+      (cl-destructuring-bind (&key start end completions) response
+        (when completions
+          ;; Display a message only in php-mode buffers, not in the
+          ;; boris-repl buffer (which would be redundant)
+          (unless (eq major-mode 'boris-mode)
+            (message "Completing using Boris REPL"))
+          (list
+           (+ (point-at-bol) start) (+ (point-at-bol) end)
+           completions))))))
 
 ;;;###autoload
 (defun boris-eldoc-function ()
   (or (and (functionp boris-original-eldoc-function)
            (funcall boris-original-eldoc-function))
       (when (boris-connected-p)
-        (boris--call-for-info 'hint nil #'boris-eldoc-callback)
+        (boris--call-for-info 'hint #'boris-eldoc-callback)
         "")))
 
 (defun boris-eldoc-callback (response)
@@ -332,12 +332,7 @@
 ;;;###autoload
 (defun boris-get-documentation ()
   (interactive)
-  (let* ((line (buffer-substring-no-properties (point-at-bol) (point)))
-         (evaluate-p (eq major-mode 'boris-mode))
-         (docs (boris-call
-                `((operation . documentation)
-                  (line . ,line)
-                  (evaluate . ,evaluate-p)))))
+  (let ((docs (boris--call-for-info 'documentation)))
     (when docs
       (with-help-window "*boris help*"
         (princ docs))
@@ -364,6 +359,20 @@
     (widen)
     (goto-char (point-min))
     (forward-line (1- line-number))))
+
+(defun boris--call-for-info (operation &optional callback)
+  (let* ((start
+          (save-excursion
+            (ignore-errors
+              (backward-up-list))
+            (point-at-bol)))
+         (text
+          (buffer-substring-no-properties start (point)))
+         (evaluate-p (eq major-mode 'boris-mode)))
+    (boris-call `((operation . ,operation)
+                  (line . ,text)
+                  (evaluate . ,evaluate-p))
+                callback)))
 
 
 ;;;; Setup php-mode
@@ -618,7 +627,8 @@ work as normal."
 ;;; Company-mode integration
 
 ;; FIXME
-(defvar boris-hack-completion-beginning nil)
+(defvar boris-company-data nil)
+(defvar boris-company-last-point nil)
 
 (defun boris-company (command &optional arg &rest _ignore)
   (interactive 'interactive)
@@ -626,34 +636,51 @@ work as normal."
     (cl-case command
       (interactive (company-begin-backend 'boris-company))
 
+      (init
+       (add-hook 'after-change-functions
+                 (lambda (&rest ignore)
+                   (setq boris-company-data nil
+                         boris-company-last-point nil))
+                 nil t))
+
       (prefix
-       (let ((response (boris--call-for-completions)))
-         (when response
-           (cl-destructuring-bind (start end _) response
-             (setq boris-hack-completion-beginning start)
-             (let ((prefix (buffer-substring start end))
-                   (show-all-p (looking-back "\\(\\(->\\|::\\)\\s-*\\)\\|new\\s-*\\(\\sw\\|\\s_\\)*")))
-               (cons prefix (or show-all-p (length prefix))))))))
+       (cl-destructuring-bind (&key start end &allow-other-keys)
+           (boris--company-data)
+         (when (and start end)
+           (let ((prefix (buffer-substring start end))
+                 (show-all-p (looking-back "\\(\\(->\\|::\\)\\s-*\\)\\|new\\s-*\\(\\sw\\|\\s_\\)*")))
+             (cons prefix (or show-all-p (length prefix)))))))
       
       (candidates
-       (let ((response (boris--call-for-completions)))
-         (when response
-           (cl-destructuring-bind (_ _ completions) response
-             completions))))
+       (cl-destructuring-bind (&key completions &allow-other-keys)
+           (boris--company-data)
+         completions))
 
       (meta
-       (boris--call-for-meta arg))
+       (cl-destructuring-bind (&key annotations &allow-other-keys)
+           (boris--company-data)
+         (cl-destructuring-bind (&key description &allow-other-keys)
+             (gethash arg annotations)
+           (or description ""))))
 
       (annotation
-       (boris--call-for-annotation arg))
+       (cl-destructuring-bind (&key annotations &allow-other-keys)
+           (boris--company-data)
+         (cl-destructuring-bind (&key arguments &allow-other-keys)
+             (gethash arg annotations)
+           (or arguments ""))))
 
       (location
-       (boris--call-for-location arg))
+       (cl-destructuring-bind (&key annotations &allow-other-keys)
+           (boris--company-data)
+         (cl-destructuring-bind (&key file line &allow-other-keys)
+             (gethash arg annotations)
+           (cons file line))))
 
-      (doc-buffer
-       (let ((docs
-              (boris--call-for-info 'documentation arg)))
-         (company-doc-buffer docs)))
+      ;; (doc-buffer
+      ;;  (let ((docs
+      ;;         (boris--call-for-info 'documentation arg)))
+      ;;    (company-doc-buffer docs)))
 
       (post-completion
        (message (funcall eldoc-documentation-function)))
@@ -662,55 +689,44 @@ work as normal."
 
       (t nil))))
 
-(defun boris--call-for-completions ()
-  (let* ((beginning-of-line (point-at-bol))
-         (text (buffer-substring-no-properties beginning-of-line (point)))
-         (evaluate-p (eq major-mode 'boris-mode))
-         (response 
-          (boris-call `((operation . complete)
-                        (line . ,text)
-                        (evaluate . ,evaluate-p)))))
-    (when (and response (gethash "completions" response))
-      (list
-       (+ beginning-of-line (gethash "start" response))
-       (+ beginning-of-line (gethash "end" response))
-       (gethash "completions" response)))))
 
-;; This implementation of meta & annotation is inefficient and
-;; ungainly, and should be replaced with something better
-(defun boris--call-for-meta (candidate)
-  (boris--call-for-info 'shortdoc candidate))
+(defun boris--company-data ()
+  (if (and boris-company-data
+           (= (point) boris-company-last-point))
+      boris-company-data
+    (let* ((beginning-of-line 
+            (save-excursion
+              (ignore-errors
+                (backward-up-list))
+              (point-at-bol)))
+           (text (buffer-substring-no-properties beginning-of-line (point)))
+           (evaluate-p (eq major-mode 'boris-mode))
+           (response 
+            (boris-call `((operation . annotate)
+                          (line . ,text)
+                          (evaluate . ,evaluate-p)))))
+      (setq boris-company-data (boris--parse-company-data response
+                                                          beginning-of-line)
+            boris-company-last-point (point))
+      boris-company-data)))
 
-(defun boris--call-for-annotation (candidate)
-  (let ((response (boris--call-for-info 'hint candidate)))
-    (when response
-      (substring response (length candidate)))))
+(defun boris--parse-company-data (data offset)
+  (cl-loop
+   for (key value) on data by #'cddr
+   append
+   (list key
+         (cl-case key
+           (:annotations (boris--plist-to-hash-table value))
+           ((:start :end) (+ value offset))
+           (t value)))))
 
-(defun boris--call-for-location (candidate)
-  (let ((response (boris--call-for-info 'location candidate)))
-    (when response
-      (cons (gethash "file" response)
-            (gethash "line" response)))))
-
-(defun boris--call-for-info (operation &optional candidate callback)
-  (let* ((beginning-of-line
-          (save-excursion
-            (ignore-errors
-              (backward-up-list))
-            (point-at-bol)))
-         (text
-          (if candidate
-              ;; FIXME: Horrible hack
-              (concat
-               (buffer-substring-no-properties beginning-of-line
-                                               boris-hack-completion-beginning)
-               candidate)
-            (buffer-substring-no-properties beginning-of-line (point))))
-         (evaluate-p (eq major-mode 'boris-mode)))
-    (boris-call `((operation . ,operation)
-                  (line . ,text)
-                  (evaluate . ,evaluate-p))
-                callback)))
+(defun boris--plist-to-hash-table (plist)
+  (let ((table (make-hash-table :test 'equal)))
+    (cl-loop for (key value) on plist by #'cddr
+             do
+             (let ((key-string (substring (symbol-name key) 1)))
+               (puthash key-string value table)))
+    table))
 
 
 

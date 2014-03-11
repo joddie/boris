@@ -12,8 +12,12 @@ class Completer {
   private $evalWorker;
   private $parser;
 
+  /**
+   * List of built-in keywords.
+   *
+   * From http://php.net/manual/en/reserved.keywords.php
+   */
   static $PHP_KEYWORDS = array(
-    /* taken from http://php.net/manual/en/reserved.keywords.php */
     '__halt_compiler',
     'abstract', 'and', 'array', 'as', 'break', 'callable', 'case', 'catch',
     'class', 'clone', 'const', 'continue', 'declare', 'default', 'die',
@@ -24,10 +28,9 @@ class Completer {
     'list', 'namespace', 'new', 'or', 'print', 'private', 'protected', 'public',
     'require', 'require_once', 'return', 'static', 'switch', 'throw', 'trait',
     'try', 'unset', 'use', 'var', 'while', 'xor',
-
-    /* Not sure if these are really necessary.. */
     '__CLASS__', '__DIR__', '__FILE__', '__FUNCTION__', '__LINE__', '__METHOD__',
-    '__NAMESPACE__', '__TRAIT__');
+    '__NAMESPACE__', '__TRAIT__'
+    );
 
   public function __construct($evalWorker) {
     $this->evalWorker = $evalWorker;
@@ -43,10 +46,12 @@ class Completer {
    * possible completions.  If no completions are available, returns
    * NULL.
    */
-  public function getCompletions($input, $evaluate, $scope) {
+  public function getCompletions($input, $evaluate, $scope, $annotate = false) {
     $info = $this->parser->getCompletionInfo($input);
     if($info === NULL) return NULL;
 
+    $completions = array();
+    $annotations = array();
     switch($info->how) {
     case CompletionParser::COMPLETE_MEMBER:
     case CompletionParser::COMPLETE_STATIC:
@@ -64,6 +69,9 @@ class Completer {
       $properties = $this->filterCompletions($properties, $info->symbol);
       $methods = $this->filterCompletions($methods, $info->symbol, TRUE);
       $completions = array_merge($properties, $methods);
+      if ($annotate) {
+        $annotations = $this->annotateMembers($context, $properties, $methods);
+      }
       break;
 
     case CompletionParser::COMPLETE_VARIABLE:
@@ -88,6 +96,9 @@ class Completer {
                                                $info->symbol, TRUE);
       $completions = array_map(function($name) { return $name . '('; },
                                $completions);
+      if ($annotate) {
+        $annotations = $this->annotateClasses($completions);
+      }
       break;
 
     case CompletionParser::COMPLETE_SYMBOL:
@@ -98,6 +109,9 @@ class Completer {
       $symbols = $this->filterCompletions($this->bareSymbols(),
                                           $info->symbol, TRUE);
       $completions = array_merge($constants, $symbols);
+      if ($annotate) {
+        $annotations = $this->annotateFunctions($completions);
+      }
       break;
 
     default:
@@ -105,10 +119,13 @@ class Completer {
         "Unexpected value %s returned from getCompletionInfo",
         $info->how));
     }
-
-    return array('start' => $info->start,
-                 'end' => $info->end,
-                 'completions' => $completions);
+    $response = array('start' => $info->start,
+                      'end' => $info->end,
+                      'completions' => $completions);
+    if ($annotate) {
+      $response['annotations'] = $annotations;
+    }
+    return $response;
   }
 
   /**
@@ -121,7 +138,7 @@ class Completer {
     $refl = $this->getReflectionObject($info, $evaluate, $scope);
     if(!$refl) return NULL;
     try {
-      return self::formatFunction($refl, $info->arg);
+      return $this->formatFunction($refl, $info->arg);
     } catch(\ReflectionException $e) {
       return NULL;
     }
@@ -272,6 +289,7 @@ class Completer {
    * These are the symbols which can appear after the :: operator.
    *
    * Properties and constants are case sensitive, but methods are not.
+   * TODO: Merge objectMembers and staticMembers together
    */
   private function staticMembers($obj) {
     try {
@@ -289,6 +307,99 @@ class Completer {
     }
   }
 
+  /**
+   * Return the first line of a documentation comment, if any.
+   */
+  private static function getDocstring(\Reflector $refl) {
+    $doc_comment = $refl->getDocComment();
+    if ($doc_comment) {
+      if (preg_match('|/[*][*]\s*\n\s*[*]\s*(.*)$|m', $doc_comment, $matches)) {
+        return $matches[1];
+      }
+    }
+    return '';
+  }
+
+  private function annotateMembers($obj, $properties, $methods) {
+    $annotations = array();
+    try {
+      if (is_object($obj)) {
+        $refl = new \ReflectionObject($obj);
+      } else {
+        $refl = new \ReflectionClass($obj);
+      }
+      foreach ($methods as $method) {
+        // Strip trailing "("
+        $name = preg_replace('|[(]\Z|', '', $method);
+        $member_refl = $refl->getMethod($name);
+        $annotations[$method] = array(
+          'description' => $this->getDocstring($member_refl),
+          'arguments' => $this->formatFunctionArguments($member_refl, -1),
+          'file' => $member_refl->getFileName(),
+          'line' => $member_refl->getStartLine(),
+          );
+      }
+
+      foreach ($properties as $property) {
+        if ($refl->getConstant($property)) continue;
+        // Strip leading "$" on static properties
+        $name = preg_replace('|\A[$]|', '', $property);
+        $member_refl = $refl->getProperty($name);
+        $class_refl = $member_refl->getDeclaringClass();
+        $annotations[$property] = array(
+          'description' => $this->getDocstring($member_refl),
+          'arguments' => '',
+          'file' => $class_refl->getFileName(),
+          'line' => $class_refl->getStartLine(),
+          );
+      }
+    } catch(\ReflectionException $e) {
+    }
+    return $annotations;
+  }
+
+  private function annotateFunctions($candidates) {
+    return $this->annotateFunctionsOrClasses($candidates, false);
+  }
+
+  private function annotateClasses($candidates) {
+    return $this->annotateFunctionsOrClasses($candidates, true);
+  }
+
+  private function annotateFunctionsOrClasses($candidates, $as_classes) {
+    if ($as_classes) {
+      $check_function = 'class_exists';
+      $reflection_class = 'ReflectionClass';
+    } else {
+      $check_function = 'function_exists';
+      $reflection_class = 'ReflectionFunction';
+    }
+
+    $annotations = array();
+    foreach ($candidates as $candidate) {
+      $name = preg_replace('|[(]\Z|', '', $candidate);
+      if (!$check_function($name)) continue;
+      try {
+        $refl = new $reflection_class($name);
+        $data = array(
+          'file' => $refl->getFileName(),
+          'line' => $refl->getStartLine(),
+          'arguments' => '',
+          'description' => $this->getDocstring($refl),
+        );
+        $refl_method = $as_classes ? $refl->getConstructor() : $refl;
+        if ($refl_method) {
+          $data['arguments'] = $this->formatFunctionArguments($refl_method);
+          if (!$data['description']) {
+            $data['description'] = $this->getDocstring($refl_method);
+          }
+        }
+        $annotations[$candidate] = $data;
+      } catch(\ReflectionException $e) {
+      }
+    }
+    return $annotations;
+  }
 
 
   /**********************************************************************
@@ -335,23 +446,34 @@ class Completer {
   /**
    * Format information about function / method arguments, for getHint()
    */
-  private static function formatFunction($refl, $arg) {
-    $params   = $refl->getParameters();
-    $n        = $refl->getNumberOfRequiredParameters();
-    $required = array_slice($params, 0, $n);
-    $optional = array_slice($params, $n);
-
-    $arguments = count($optional)
-      ? sprintf('%s[, %s]',
-                self::formatParams($required, $arg),
-                self::formatParams($optional, $arg))
-      : self::formatParams($required, $arg);
+  private static function formatFunction($refl, $arg = -1) {
+    $arguments = self::formatFunctionArguments($refl, $arg);
     $reference = $refl->returnsReference() ? '&' : '';
     $name = $refl instanceof \ReflectionMethod && $refl->isConstructor()
       ? $refl->getDeclaringClass()->name
       : $refl->name;
 
     return "{$reference}{$name}({$arguments})";
+  }
+
+  private static function formatFunctionArguments(\ReflectionFunctionAbstract $refl, $arg = -1) {
+    $params   = $refl->getParameters();
+    $n        = $refl->getNumberOfRequiredParameters();
+    $required = array_slice($params, 0, $n);
+    $optional = array_slice($params, $n);
+
+    if (count($optional) && count($required)) {
+      return sprintf('%s[, %s]',
+                     self::formatParams($required, $arg),
+                     self::formatParams($optional, $arg));
+    } else if(count($required)) {
+      return self::formatParams($required, $arg);
+    } else if (count($optional)) {
+      return sprintf('[%s]',
+                     self::formatParams($optional, $arg)); 
+    } else {
+      return '';
+    }
   }
 
   private static function formatParams(array $params, $index) {

@@ -128,6 +128,11 @@ class EvalWorker {
         $__response = $this->_packResponse($return);
         break;
 
+      case 'annotate':
+        $return = $this->_completer->getCompletions($input->line, $input->evaluate, $__scope, true);
+        $__response = $this->_packResponse($return);
+        break;
+
       case 'hint':
         $return = $this->_completer->getHint($input->line, $input->evaluate, $__scope);
         $__response = $this->_packResponse($return);
