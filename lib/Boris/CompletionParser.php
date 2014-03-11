@@ -41,7 +41,7 @@ class CompletionParser {
     elseif (($match = $this->popMatch($tokens, array(T_OBJECT_OPERATOR, T_STRING)))) {
       $symbol = $match[1];
       $context = $this->getContext($tokens);
-      if($context->is_bare) return NULL;
+      if(!$context || $context->is_bare) return NULL;
       return $this->completionInfo(self::COMPLETE_MEMBER, $context, $symbol);
     }
     elseif (($match = $this->popMatch($tokens, array(T_DOUBLE_COLON, T_STRING)))
@@ -65,7 +65,7 @@ class CompletionParser {
         $symbol->text = substr($symbol->text, 1);
       }
       $context = $this->getContext($tokens);
-      if($context->is_bare) return NULL;
+      if(!$context || $context->is_bare) return NULL;
       return $this->completionInfo(self::COMPLETE_INDEX, $context, $symbol);
     }
     elseif (($match = $this->popMatch($tokens, array(T_NEW)))) {
