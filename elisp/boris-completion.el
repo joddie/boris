@@ -3,7 +3,7 @@
 ;; Copyright (C) 2013-2014 joddie <jonxfield@gmail.com>
 
 ;; Author: joddie
-;; Version: 0.33
+;; Version: 0.35
 ;; Keywords: php, repl, boris
 
 ;; This file is NOT part of GNU Emacs.
@@ -291,6 +291,10 @@
                 (delete-region (point-min) (+ (point-min) read-chars))
                 (when boris-async-callbacks
                   (funcall (pop boris-async-callbacks) response))))))))))
+
+(defun boris-show-connection ()
+  (interactive)
+  (pop-to-buffer boris-buffer))
 
 (defun boris-pack-request (data)
   (let* ((json (json-encode data))
@@ -628,20 +632,15 @@ work as normal."
 
 ;; FIXME
 (defvar boris-company-data nil)
+(defvar boris-company-annotations nil)
 (defvar boris-company-last-point nil)
+(defvar boris-company-last-tick nil)
 
 (defun boris-company (command &optional arg &rest _ignore)
   (interactive 'interactive)
   (when (boris-connected-p)
     (cl-case command
       (interactive (company-begin-backend 'boris-company))
-
-      (init
-       (add-hook 'after-change-functions
-                 (lambda (&rest ignore)
-                   (setq boris-company-data nil
-                         boris-company-last-point nil))
-                 nil t))
 
       (prefix
        (cl-destructuring-bind (&key start end &allow-other-keys)
@@ -657,25 +656,22 @@ work as normal."
          completions))
 
       (meta
-       (cl-destructuring-bind (&key annotations &allow-other-keys)
-           (boris--company-data)
-         (cl-destructuring-bind (&key description &allow-other-keys)
-             (gethash arg annotations)
-           (or description ""))))
+       (and boris-company-annotations
+            (cl-destructuring-bind (&key description &allow-other-keys)
+                (gethash arg boris-company-annotations)
+              (or description ""))))
 
       (annotation
-       (cl-destructuring-bind (&key annotations &allow-other-keys)
-           (boris--company-data)
-         (cl-destructuring-bind (&key arguments &allow-other-keys)
-             (gethash arg annotations)
-           (or arguments ""))))
+       (and boris-company-annotations
+            (cl-destructuring-bind (&key arguments &allow-other-keys)
+                (gethash arg boris-company-annotations)
+              (or arguments ""))))
 
       (location
-       (cl-destructuring-bind (&key annotations &allow-other-keys)
-           (boris--company-data)
-         (cl-destructuring-bind (&key file line &allow-other-keys)
-             (gethash arg annotations)
-           (cons file line))))
+       (and boris-company-annotations
+            (cl-destructuring-bind (&key file line &allow-other-keys)
+                (gethash arg boris-company-annotations)
+              (cons file line))))
 
       ;; (doc-buffer
       ;;  (let ((docs
@@ -691,8 +687,8 @@ work as normal."
 
 
 (defun boris--company-data ()
-  (if (and boris-company-data
-           (= (point) boris-company-last-point))
+  (if (and (equal (point) boris-company-last-point)
+           (equal (buffer-modified-tick) boris-company-last-tick))
       boris-company-data
     (let* ((beginning-of-line 
             (save-excursion
@@ -705,9 +701,13 @@ work as normal."
             (boris-call `((operation . annotate)
                           (line . ,text)
                           (evaluate . ,evaluate-p)))))
-      (setq boris-company-data (boris--parse-company-data response
-                                                          beginning-of-line)
-            boris-company-last-point (point))
+      (setq boris-company-data
+            (boris--parse-company-data response beginning-of-line)
+
+            boris-company-annotations (plist-get boris-company-data :annotations)
+
+            boris-company-last-point (point)
+            boris-company-last-tick (buffer-modified-tick))
       boris-company-data)))
 
 (defun boris--parse-company-data (data offset)
