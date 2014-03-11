@@ -249,21 +249,25 @@
               (message "Discarded partial message \"%s\" from Boris."
                        garbage)))))
 
-      (let ((unpacked
-             (condition-case _
-                 (bindat-unpack boris-response-format 
-                                (buffer-substring (point-min) (process-mark proc)))
-               (args-out-of-range nil))))
-        (when unpacked
-          (let* ((json-object-type 'hash-table)
-                 (json-array-type 'list)
-                 (response
-                  (json-read-from-string (bindat-get-field unpacked :data)))
-                 (read-chars
-                  (bindat-length boris-response-format unpacked)))
-            (delete-region (point-min) (+ (point-min) read-chars))
-            (when boris-async-callbacks
-              (funcall (pop boris-async-callbacks) response))))))))
+      ;; Handle all responses in buffer in order
+      (catch 'done
+        (while (> (point-max) (point-min))
+          (let ((unpacked
+                 (condition-case _
+                     (bindat-unpack boris-response-format
+                                    (buffer-substring (point-min) (process-mark proc)))
+                   (args-out-of-range nil))))
+            (if (not unpacked)
+                (throw 'done t)
+              (let* ((json-object-type 'hash-table)
+                     (json-array-type 'list)
+                     (response
+                      (json-read-from-string (bindat-get-field unpacked :data)))
+                     (read-chars
+                      (bindat-length boris-response-format unpacked)))
+                (delete-region (point-min) (+ (point-min) read-chars))
+                (when boris-async-callbacks
+                  (funcall (pop boris-async-callbacks) response))))))))))
 
 (defun boris-pack-request (data)
   (let* ((json (json-encode data))
