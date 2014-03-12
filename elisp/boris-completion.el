@@ -308,9 +308,10 @@
   (when (boris-prompt-for-connection)
     (let* ((line (buffer-substring-no-properties (point-at-bol) (point)))
            (evaluate-p (eq major-mode 'boris-mode))
-           (response (boris-call `((operation . complete)
-                                   (line . ,line)
-                                   (evaluate . ,evaluate-p)))))
+           (response
+            (boris-call (list :operation :complete
+                              :line line
+                              :evaluate evaluate-p))))
       (cl-destructuring-bind (&key start end completions) response
         (when completions
           ;; Display a message only in php-mode buffers, not in the
@@ -373,9 +374,9 @@
          (text
           (buffer-substring-no-properties start (point)))
          (evaluate-p (eq major-mode 'boris-mode)))
-    (boris-call `((operation . ,operation)
-                  (line . ,text)
-                  (evaluate . ,evaluate-p))
+    (boris-call (list :operation operation
+                      :line text
+                      :evaluate evaluate-p)
                 callback)))
 
 
@@ -673,13 +674,12 @@ work as normal."
                 (gethash arg boris-company-annotations)
               (cons file line))))
 
-      ;; (doc-buffer
-      ;;  (let ((docs
-      ;;         (boris--call-for-info 'documentation arg)))
-      ;;    (company-doc-buffer docs)))
+      (doc-buffer
+       (company-with-candidate-inserted arg
+         (company-doc-buffer (boris--call-for-info :documentation))))
 
       (post-completion
-       (message (funcall eldoc-documentation-function)))
+       (funcall eldoc-documentation-function))
 
       (require-match nil)
 
@@ -689,26 +689,33 @@ work as normal."
 (defun boris--company-data ()
   (if (and (equal (point) boris-company-last-point)
            (equal (buffer-modified-tick) boris-company-last-tick))
+      ;; Return the cached data
       boris-company-data
+    ;; TODO: Refactor to use boris--call-for-info
     (let* ((beginning-of-line 
             (save-excursion
               (ignore-errors
                 (backward-up-list))
               (point-at-bol)))
            (text (buffer-substring-no-properties beginning-of-line (point)))
-           (evaluate-p (eq major-mode 'boris-mode))
-           (response 
-            (boris-call `((operation . annotate)
-                          (line . ,text)
-                          (evaluate . ,evaluate-p)))))
-      (setq boris-company-data
-            (boris--parse-company-data response beginning-of-line)
+           (evaluate-p (eq major-mode 'boris-mode)))
+      (if (equal text "")
+          ;; Hack: avoid calling with an empty string, which returns a
+          ;; huge amount of data.  Need a more robust fix for this...
+          (setq boris-company-data nil
+                boris-company-annotations nil) 
+        (let ((response 
+               (boris-call (list :operation :annotate
+                                 :line text
+                                 :evaluate evaluate-p))))
+          (setq boris-company-data
+                (boris--parse-company-data response beginning-of-line))
+          (setq boris-company-annotations
+                (plist-get boris-company-data :annotations)))
 
-            boris-company-annotations (plist-get boris-company-data :annotations)
-
-            boris-company-last-point (point)
-            boris-company-last-tick (buffer-modified-tick))
-      boris-company-data)))
+        (setq boris-company-last-point (point)
+              boris-company-last-tick (buffer-modified-tick))
+        boris-company-data))))
 
 (defun boris--parse-company-data (data offset)
   (cl-loop
