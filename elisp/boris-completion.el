@@ -153,8 +153,12 @@
      4 ; response
      )))
 
-;; Timeout for asynchronous calls, in seconds
+;; Timeout for `accept-process-output', in seconds
 (defvar boris-timeout 0.5)
+
+;; Hard timeout for synchronous calls, in seconds:
+;; give up after this amount of time
+(defvar boris-hard-timeout 2)
 
 
 ;;;; Side-channel communication for completions, eldoc, doc lookup
@@ -212,19 +216,38 @@
     (boris-connected-p)))
 
 (defun boris-call (data &optional callback)
-  (let ((response nil) (flag nil))
-    (process-send-string boris-process (boris-pack-request data))
-    (if callback
-        (add-hook 'boris-async-callbacks callback t)
+  (process-send-string boris-process (boris-pack-request data))
+  (if callback
+      ;; Handle asynchronously -- mostly for ElDoc
+      (add-hook 'boris-async-callbacks callback t)
+    ;; Wrap with synchronous waiting and timeout
+    (let ((response nil) 
+          (success nil)
+          (timed-out nil))
+      ;; Success callback
       (add-hook 'boris-async-callbacks
-            (lambda (received)
-              (setq response received
-                    flag t)) t)
-      (accept-process-output boris-process boris-timeout)
-      (if flag
-          response
-        (message "Boris response timeout.")
-        nil))))
+                (lambda (received)
+                  (if (not timed-out)
+                      (setq response received
+                            success t)
+                    (message "Discarded message handled after timeout."))) t)
+      ;; Timeout callback
+      (let ((timer
+             (run-with-timer boris-hard-timeout nil
+                             (lambda () (setq timed-out t))))
+            (message "Waiting for Boris response.."))
+        ;; Wait...
+        (while (not (or success timed-out))
+          (accept-process-output boris-process boris-timeout)
+          (unless success
+            (setq message (concat message "."))
+            (message "%s" message)))
+        (if success
+            (progn
+              (cancel-timer timer)
+              response)
+          (message "%s" (concat message "timed out."))
+          nil)))))
 
 (defun boris-filter (proc string)
   (when (buffer-live-p (process-buffer proc))
