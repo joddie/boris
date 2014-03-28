@@ -203,18 +203,6 @@
        (setq boris-process nil
              boris-buffer nil)))))
 
-(defun boris-prompt-for-connection ()
-  (if (boris-connected-p)
-      t
-    (if (boris-comint-running-p)
-        (if (y-or-n-p "Connect to Boris REPL?")
-            (boris-connect)
-          (message "Use M-x boris-connect to connect."))
-      (if (y-or-n-p "Start Boris REPL?")
-          (boris)
-        (message "Use M-x boris to start.")))
-    (boris-connected-p)))
-
 (defun boris-call (data &optional callback)
   (process-send-string boris-process (boris-pack-request data))
   (if callback
@@ -305,7 +293,7 @@
 
 ;;;###autoload
 (defun boris-completion-at-point ()
-  (when (boris-prompt-for-connection)
+  (when (boris-connected-p)
     (let* ((line (buffer-substring-no-properties (point-at-bol) (point)))
            (evaluate-p (eq major-mode 'boris-mode))
            (response
@@ -314,10 +302,6 @@
                               :evaluate evaluate-p))))
       (cl-destructuring-bind (&key start end completions) response
         (when completions
-          ;; Display a message only in php-mode buffers, not in the
-          ;; boris-repl buffer (which would be redundant)
-          (unless (eq major-mode 'boris-mode)
-            (message "Completing using Boris REPL"))
           (list
            (+ (point-at-bol) start) (+ (point-at-bol) end)
            completions))))))
@@ -406,10 +390,6 @@
   (eldoc-mode +1)
   (eldoc-add-command 'completion-at-point)
   (add-hook 'completion-at-point-functions 'boris-completion-at-point nil t)
-
-  (if (boris-connected-p)
-      (message "Connected to Boris REPL.")
-    (message "Use M-x boris to start Boris REPL."))
 
   (when (require 'company nil t)
     (make-local-variable 'company-backends)
