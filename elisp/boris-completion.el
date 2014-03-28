@@ -490,22 +490,6 @@
 (define-key boris-mode-map (kbd "C-c C-/") 'boris-get-documentation)
 (define-key boris-mode-map (kbd "C-c C-z") 'boris-restart-or-pop-back)
 
-(defun boris-wait-and-connect (process string)
-  "Wait for Boris to start and connect to the port printed on the first line.
-
-This is installed as a process filter function by `boris'.  It
-passes all process output to the standard `comint-output-filter'
-function."
-  (comint-output-filter process string)
-  (when (string-match "Listening on port \\([0-9]+\\)" string)
-    (setq boris-port (string-to-number (match-string 1 string)))
-    (message "port %d" boris-port)
-    (boris-connect)
-    (when boris-connect-timer
-      (cancel-timer boris-connect-timer)
-      (setq boris-connect-timer nil))
-    (set-process-filter process 'comint-output-filter)))
-
 ;;;###autoload
 (defun boris (&optional command)
   "Run a Boris PHP REPL in a comint buffer with smart completion and Eldoc.
@@ -565,19 +549,6 @@ process and starting a new one."
      (setq boris-comint-process nil)
      (signal (car error-data) (cdr error-data)))))
 
-(defun boris--make-comint (program arguments)
-  (let ((comint-buffer
-         (apply 'make-comint boris-comint-process-name
-                program nil arguments)))
-    (with-current-buffer comint-buffer
-      (boris-mode)
-      ;; Save the command and arguments as local variables, so that
-      ;; restarting the REPL via C-c C-z in the comint buffer will
-      ;; re-run the same command.
-      (setq-local boris-command program)
-      (setq-local boris-args arguments))
-    comint-buffer))
-
 ;;;###autoload
 (defun boris-remote ()
   "Run a remote Boris REPL via SSH.
@@ -608,6 +579,35 @@ work as normal."
                       `((?h . ,host) (?p . ,port)))
                      'boris-remote-command-history)))
     (boris command)))
+
+(defun boris--make-comint (program arguments)
+  (let ((comint-buffer
+         (apply 'make-comint boris-comint-process-name
+                program nil arguments)))
+    (with-current-buffer comint-buffer
+      (boris-mode)
+      ;; Save the command and arguments as local variables, so that
+      ;; restarting the REPL via boris-restart-or-pop-back will re-run
+      ;; the same command.
+      (setq-local boris-command program)
+      (setq-local boris-args arguments))
+    comint-buffer))
+
+(defun boris-wait-and-connect (process string)
+  "Wait for Boris to start and connect to the port printed on the first line.
+
+This is installed as a process filter function by `boris'.  It
+passes all process output to the standard `comint-output-filter'
+function."
+  (comint-output-filter process string)
+  (when (string-match "Listening on port \\([0-9]+\\)" string)
+    (setq boris-port (string-to-number (match-string 1 string)))
+    (message "port %d" boris-port)
+    (boris-connect)
+    (when boris-connect-timer
+      (cancel-timer boris-connect-timer)
+      (setq boris-connect-timer nil))
+    (set-process-filter process 'comint-output-filter)))
 
 (defun boris-restart-or-pop-back ()
   "Switch back to most recent PHP source buffer, or start a new Boris REPL."
