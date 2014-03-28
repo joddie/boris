@@ -350,18 +350,21 @@
 (defun boris--call-for-info (operation &optional callback)
   ;; Bail out in strings and comments
   (if (boris--in-string-or-comment)
-      (if callback
-          (funcall callback nil)
-        nil)
-
+      (if callback (funcall callback nil) nil)
     (let* ((text
             (buffer-substring-no-properties (boris--beginning-of-text)
                                             (point)))
            (evaluate-p (eq major-mode 'boris-mode)))
-      (boris-call (list :operation operation
-                        :line text
-                        :evaluate evaluate-p)
-                  callback))))
+      (if (and (eq operation :annotate) (equal text ""))
+          ;; Hack: Bail out instead of requesting information on an
+          ;; empty string (which returns information on all symbols
+          ;; and slows things down).  Need a more robust fix for this.
+          (if callback (funcall callback nil) nil)
+        ;; Otherwise make the request
+        (boris-call (list :operation operation
+                          :line text
+                          :evaluate evaluate-p)
+                    callback)))))
 
 (defun boris--in-string-or-comment ()
   (cl-destructuring-bind
@@ -650,7 +653,6 @@ function."
 ;;; Company-mode integration
 
 (defvar boris-company-data nil)
-(defvar boris-company-annotations nil)
 (defvar boris-company-last-point nil)
 (defvar boris-company-last-tick nil)
 
@@ -669,27 +671,18 @@ function."
              (cons prefix (or show-all-p (length prefix)))))))
       
       (candidates
-       (cl-destructuring-bind (&key completions &allow-other-keys)
-           (boris--company-data)
-         completions))
+       (plist-get (boris--company-data) :completions))
 
       (meta
-       (and boris-company-annotations
-            (cl-destructuring-bind (&key description &allow-other-keys)
-                (gethash arg boris-company-annotations)
-              (or description ""))))
+       (boris--get-annotation arg :description))
 
       (annotation
-       (and boris-company-annotations
-            (cl-destructuring-bind (&key arguments &allow-other-keys)
-                (gethash arg boris-company-annotations)
-              (or arguments ""))))
+       (boris--get-annotation arg :arguments))
 
       (location
-       (and boris-company-annotations
-            (cl-destructuring-bind (&key file line &allow-other-keys)
-                (gethash arg boris-company-annotations)
-              (cons file line))))
+       (cl-destructuring-bind (&key file line &allow-other-keys)
+           (boris--get-annotations arg)
+         (cons file line)))
 
       (doc-buffer
        (company-with-candidate-inserted arg
@@ -702,37 +695,33 @@ function."
 
       (t nil))))
 
-
 (defun boris--company-data ()
-  (if (and (equal (point) boris-company-last-point)
-           (equal (buffer-modified-tick) boris-company-last-tick))
-      ;; Return the cached data
-      boris-company-data
-    ;; TODO: Refactor to use boris--call-for-info
-    (let* ((beginning-of-line 
-            (save-excursion
-              (ignore-errors
-                (backward-up-list))
-              (point-at-bol)))
-           (text (buffer-substring-no-properties beginning-of-line (point)))
-           (evaluate-p (eq major-mode 'boris-mode)))
-      (if (equal text "")
-          ;; Hack: avoid calling with an empty string, which returns a
-          ;; huge amount of data.  Need a more robust fix for this...
-          (setq boris-company-data nil
-                boris-company-annotations nil) 
-        (let ((response 
-               (boris-call (list :operation :annotate
-                                 :line text
-                                 :evaluate evaluate-p))))
-          (setq boris-company-data
-                (boris--parse-company-data response beginning-of-line))
-          (setq boris-company-annotations
-                (plist-get boris-company-data :annotations)))
+  (cond
+    ;; Bail in strings and comments
+    ((boris--in-string-or-comment) nil)
 
-        (setq boris-company-last-point (point)
-              boris-company-last-tick (buffer-modified-tick))
-        boris-company-data))))
+    ;; Return cached data if possible
+    ((and (equal (point) boris-company-last-point)
+          (equal (buffer-modified-tick) boris-company-last-tick))
+     boris-company-data)
+
+    ;; Otherwise call Boris for info
+    (t
+     (let ((start-point (boris--beginning-of-text))
+           (response (boris--call-for-info :annotate)))
+       (setq boris-company-data
+             (boris--parse-company-data response start-point))
+       (setq boris-company-last-point (point)
+             boris-company-last-tick (buffer-modified-tick))
+       boris-company-data))))
+
+(defun boris--get-annotation (candidate property)
+  (plist-get (boris--get-annotations candidate) property))
+
+(defun boris--get-annotations (candidate)
+  (let ((annotations (plist-get (boris--company-data) :annotations)))
+    (and annotations
+         (gethash candidate annotations))))
 
 (defun boris--parse-company-data (data offset)
   (cl-loop
