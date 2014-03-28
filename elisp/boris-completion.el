@@ -1,8 +1,8 @@
 ;;; boris-completion.el --- context-sensitive completion hack for boris repl -*- lexical-binding: t -*-
 
-;; Copyright (C) 2013-2014 joddie <jonxfield@gmail.com>
+;; Copyright (C) 2013-2014 Jon Oddie <jonxfield@gmail.com>
 
-;; Author: joddie
+;; Author: Jon Oddie <jonxfield@gmail.com>
 ;; Version: 0.35
 ;; Keywords: php, repl, boris
 
@@ -34,9 +34,7 @@
 
 ;;; Silence compilation warnings.
 (eval-when-compile
-  (declare-function company-begin-backend "company.el")
-  (declare-function company-doc-buffer "company.el")
-  (defvar company-backends))
+  (require 'company))
 
 ;;; Customization options
 ;;;###autoload
@@ -626,7 +624,6 @@ function."
 
 ;;; Company-mode integration
 
-;; FIXME
 (defvar boris-company-data nil)
 (defvar boris-company-annotations nil)
 (defvar boris-company-last-point nil)
