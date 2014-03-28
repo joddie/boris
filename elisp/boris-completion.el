@@ -3,7 +3,7 @@
 ;; Copyright (C) 2013-2014 Jon Oddie <jonxfield@gmail.com>
 
 ;; Author: Jon Oddie <jonxfield@gmail.com>
-;; Version: 0.35
+;; Version: 0.36
 ;; Keywords: php, repl, boris
 
 ;; This file is NOT part of GNU Emacs.
