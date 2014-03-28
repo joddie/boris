@@ -533,27 +533,15 @@ process and starting a new one."
 
         (if (null command)
             ;; Use the default boris-command & boris-args
-            (let ((comint-buffer
-                   (apply 'make-comint boris-comint-process-name
-                          boris-command nil boris-args)))
-              (with-current-buffer comint-buffer (boris-mode))
-              (setq boris-comint-process-buffer comint-buffer))
+            (setq boris-comint-process-buffer
+                  (boris--make-comint boris-command boris-args))
 
           ;; Split custom command and run it
           (let* ((words (split-string command))
                  (program (car words))
-                 (arguments (cdr words))
-                 (comint-buffer
-                  (apply 'make-comint boris-comint-process-name
-                         program nil arguments)))
-            (with-current-buffer comint-buffer
-              (boris-mode)
-              ;; Save the command and arguments as local variables, so
-              ;; that restarting the REPL via C-c C-z in this buffer
-              ;; will re-run the same command
-              (setq-local boris-command program)
-              (setq-local boris-args arguments))
-            (setq boris-comint-process-buffer comint-buffer)))
+                 (arguments (cdr words)))
+            (setq boris-comint-process-buffer
+                  (boris--make-comint program arguments))))
 
         ;; Keep a reference to the comint process
         (setq boris-comint-process
@@ -567,7 +555,8 @@ process and starting a new one."
           (setq boris-connect-timer
                 (run-at-time boris-start-timeout nil
                              (lambda ()
-                               (message "Connection timeout. Try M-x boris-connect."))))
+                               (message "Connection timeout. Try M-x boris-connect.")
+                               (set-process-filter boris-comint-process 'comint-output-filter))))
           (set-process-filter boris-comint-process 'boris-wait-and-connect)))
 
     ;; Clean up on error
@@ -575,6 +564,19 @@ process and starting a new one."
      (setq boris-comint-process-buffer nil)
      (setq boris-comint-process nil)
      (signal (car error-data) (cdr error-data)))))
+
+(defun boris--make-comint (program arguments)
+  (let ((comint-buffer
+         (apply 'make-comint boris-comint-process-name
+                program nil arguments)))
+    (with-current-buffer comint-buffer
+      (boris-mode)
+      ;; Save the command and arguments as local variables, so that
+      ;; restarting the REPL via C-c C-z in the comint buffer will
+      ;; re-run the same command.
+      (setq-local boris-command program)
+      (setq-local boris-args arguments))
+    comint-buffer))
 
 ;;;###autoload
 (defun boris-remote ()
