@@ -348,18 +348,43 @@
     (forward-line (1- line-number))))
 
 (defun boris--call-for-info (operation &optional callback)
-  (let* ((start
-          (save-excursion
-            (ignore-errors
-              (backward-up-list))
-            (point-at-bol)))
-         (text
-          (buffer-substring-no-properties start (point)))
-         (evaluate-p (eq major-mode 'boris-mode)))
-    (boris-call (list :operation operation
-                      :line text
-                      :evaluate evaluate-p)
-                callback)))
+  ;; Bail out in strings and comments
+  (if (boris--in-string-or-comment)
+      (if callback
+          (funcall callback nil)
+        nil)
+
+    (let* ((text
+            (buffer-substring-no-properties (boris--beginning-of-text)
+                                            (point)))
+           (evaluate-p (eq major-mode 'boris-mode)))
+      (boris-call (list :operation operation
+                        :line text
+                        :evaluate evaluate-p)
+                  callback))))
+
+(defun boris--in-string-or-comment ()
+  (cl-destructuring-bind
+        (_ _ _ in-string in-comment &rest ignore)
+      (syntax-ppss)
+    (or in-string in-comment)))
+
+(defun boris--beginning-of-text ()
+  ;; Find the beginning of text to send for documentation purposes.
+  ;; This would normally be the beginning of line, but it could be
+  ;; several lines up when point is inside a multi-line argument list.
+  (or
+   ;; Try to move up out of the innermost list of function arguments
+   (save-excursion
+     (ignore-errors
+       (backward-up-list)
+       (if (looking-at "(")
+           (point-at-bol)
+         nil)))
+   ;; Either there was an error moving outside of the enclosing list,
+   ;; or the enclosing list doesn't start with (, so not an argument
+   ;; list.  In this case just use the beginning of line.
+   (point-at-bol)))
 
 
 ;;;; Setup php-mode
