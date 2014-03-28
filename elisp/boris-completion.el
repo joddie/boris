@@ -365,15 +365,43 @@
 
 
 ;;;; Setup php-mode
-;; TODO: Make a minor mode.
 
 ;;;###autoload
-(defun boris-setup-php-mode ()
-  (define-key php-mode-map (kbd "C-c C-z") 'boris-open-or-pop-to-repl)
-  (define-key php-mode-map (kbd "C-c d")   'boris-get-documentation)
-  (define-key php-mode-map (kbd "C-c C-/") 'boris-get-documentation)
-  (define-key php-mode-map (kbd "C-c C-k") 'boris-load-file)
-  (add-hook 'php-mode-hook 'boris-php-mode-hook))
+(define-minor-mode boris-minor-mode
+    "Minor mode for completion and Eldoc via Boris in PHP buffers."
+  :lighter (:eval (boris-mode-line-process))
+  :keymap
+  `((,(kbd "C-c C-z") . boris-open-or-pop-to-repl)
+    (,(kbd "C-c C-d") . boris-get-documentation)
+    (,(kbd "C-c C-/") . boris-get-documentation)
+    (,(kbd "C-c C-k") . boris-load-file))
+
+  (if boris-minor-mode
+      ;; turn on 
+      (progn
+        (setq boris-original-eldoc-function eldoc-documentation-function)
+        (set (make-local-variable 'eldoc-documentation-function)
+             #'boris-eldoc-function)
+        (eldoc-mode +1)
+        (eldoc-add-command 'completion-at-point)
+        (add-hook 'completion-at-point-functions #'boris-completion-at-point nil t)
+
+        (when (require 'company nil t)
+          (make-local-variable 'company-backends)
+          (push #'boris-company company-backends)
+          (company-mode 1)))
+
+    ;; turn off
+    (setq eldoc-documentation-function boris-original-eldoc-function)
+    (remove-hook 'completion-at-point-functions #'boris-completion-at-point t)))
+
+(easy-menu-define nil boris-minor-mode-map
+  ""
+  '("Boris"
+    ["Connect" boris-connect (not (boris-connected-p))]
+    ["Open REPL" boris-open-or-pop-to-repl t]
+    ["Help on thing at point" boris-get-documentation (boris-connected-p)]
+    ["Load file" boris-load-file t]))
 
 (defun boris-open-or-pop-to-repl ()
   (interactive)
@@ -383,31 +411,16 @@
     ;; call-interactively passes along any prefix argument
     (call-interactively #'boris)))
 
-(defun boris-php-mode-hook ()
-  (setq boris-original-eldoc-function eldoc-documentation-function)
-  (set (make-local-variable 'eldoc-documentation-function)
-       'boris-eldoc-function)
-  (eldoc-mode +1)
-  (eldoc-add-command 'completion-at-point)
-  (add-hook 'completion-at-point-functions 'boris-completion-at-point nil t)
-
-  (when (require 'company nil t)
-    (make-local-variable 'company-backends)
-    (push #'boris-company company-backends)
-    (company-mode 1))
-
-  (setq-local mode-line-process '(:eval (boris-mode-line-process))))
-
 (defun boris-mode-line-process ()
   (cond ((boris-connected-p)
-         (propertize "+boris"
+         (propertize " Boris"
                      'face 'boris-mode-line-connected
                      'help-echo "Connected to running REPL."))
         ((boris-comint-running-p)
-         (propertize "-boris" 'face 'boris-mode-line-run
+         (propertize " Boris" 'face 'boris-mode-line-run
                      'help-echo "REPL running but not connected."))
         (t
-         (propertize " boris" 'face 'boris-mode-line-disconnected
+         (propertize " Boris" 'face 'boris-mode-line-disconnected
                      'help-echo "No running REPL."))))
 
 (defun boris-load-file (file-name)
@@ -727,7 +740,8 @@ function."
   (add-to-list 'compilation-error-regexp-alist 'boris-php-backtrace))
 
 ;;;###autoload
-(eval-after-load 'php-mode '(boris-setup-php-mode))
+(eval-after-load 'php-mode
+  '(add-hook 'php-mode-hook 'boris-minor-mode))
 
 ;;;###autoload
 (eval-after-load 'compile '(boris-setup-compilation-mode))
