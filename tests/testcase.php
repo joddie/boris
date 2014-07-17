@@ -1,4 +1,34 @@
 <?php
+class test {
+  /* An instance variable */
+  var $instance_member = 32;
+
+  /**
+   * An instance method
+   */
+  function instance_method($arg, $arg2) { }
+
+  /**
+   * A static property
+   */
+  static $static_member = 123;
+
+  /**
+   * A static method
+   */
+  static function static_method($arg, $arg2, $arg3) { }
+
+  /**
+   * A constant
+   */
+  const constant = 9;
+}
+
+class derived extends test {
+  var $new_member = 9;
+  static function new_static_method () { }
+}
+
 class DummyClass {
     const CONSTANT = 12;
     const __ANOTHER_CONSTANT = "string";
@@ -22,3 +52,4 @@ class DummyClass {
     public static function static_method($x, $y) { return 42; }
     public static function another_static_method() { return 93; }
 }
+

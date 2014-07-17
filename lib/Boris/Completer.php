@@ -4,33 +4,16 @@
 
 namespace Boris;
 
+require "Completions.php";
+
 /**
- *
+ * Performs context-sensitive completion and information lookup.
  */
 class Completer {
+  use Completions\AnnotateSignature;
 
   private $evalWorker;
   private $parser;
-
-  /**
-   * List of built-in keywords.
-   *
-   * From http://php.net/manual/en/reserved.keywords.php
-   */
-  static $PHP_KEYWORDS = array(
-    '__halt_compiler',
-    'abstract', 'and', 'array', 'as', 'break', 'callable', 'case', 'catch',
-    'class', 'clone', 'const', 'continue', 'declare', 'default', 'die',
-    'do', 'echo', 'else', 'elseif', 'empty', 'enddeclare', 'endfor', 'endforeach',
-    'endif', 'endswitch', 'endwhile', 'eval', 'exit', 'extends',
-    'final', 'for', 'foreach', 'function', 'global', 'goto', 'if', 'implements',
-    'include', 'include_once', 'instanceof', 'insteadof', 'interface', 'isset',
-    'list', 'namespace', 'new', 'or', 'print', 'private', 'protected', 'public',
-    'require', 'require_once', 'return', 'static', 'switch', 'throw', 'trait',
-    'try', 'unset', 'use', 'var', 'while', 'xor',
-    '__CLASS__', '__DIR__', '__FILE__', '__FUNCTION__', '__LINE__', '__METHOD__',
-    '__NAMESPACE__', '__TRAIT__'
-    );
 
   public function __construct($evalWorker) {
     $this->evalWorker = $evalWorker;
@@ -50,68 +33,39 @@ class Completer {
     $info = $this->parser->getCompletionInfo($input);
     if($info === NULL) return NULL;
 
-    $completions = array();
-    $annotations = array();
+    $source = null;
     switch($info->how) {
     case CompletionParser::COMPLETE_MEMBER:
+      $context = $this->getLiveContext($info->context, $evaluate, $scope);
+      if ($context) {
+        $source = new Completions\Members($context);
+      } 
+      break;
+
     case CompletionParser::COMPLETE_STATIC:
       $context = $this->getLiveContext($info->context, $evaluate, $scope);
-      if(!$context) {
-        $completions = array();
-        break;
-      }
-      if($info->how == CompletionParser::COMPLETE_MEMBER)
-        list($properties, $methods) = $this->objectMembers($context);
-      else
-        list($properties, $methods) = $this->staticMembers($context);
-      /* Constants and properties are case sensitive. Functions and
-       * methods are not. */
-      $properties = $this->filterCompletions($properties, $info->symbol);
-      $methods = $this->filterCompletions($methods, $info->symbol, TRUE);
-      $completions = array_merge($properties, $methods);
-      if ($annotate) {
-        $annotations = $this->annotateMembers($context, $properties, $methods);
-      }
+      if ($context) {
+        $source = new Completions\StaticMembers($context);
+      } 
       break;
 
     case CompletionParser::COMPLETE_VARIABLE:
-      $candidates = array_map(function($name) { return '$' . $name; },
-                              array_keys($scope));
-      $completions = $this->filterCompletions($candidates, $info->symbol);
+      $source = new Completions\Variables($scope);
       break;
 
     case CompletionParser::COMPLETE_INDEX:
       $context = $this->getLiveContext($info->context, $evaluate, $scope);
-      if(is_array($context)) {
-        $completions = $this->filterCompletions(array_keys($context),
-                                                $info->symbol);
-      } else {
-        $completions = array();
-      }
+      $source = new Completions\ArrayIndices($context);
       break;
-
+      
     case CompletionParser::COMPLETE_CLASS:
       $this->stripInitialSlash($info);
-      $completions = $this->filterCompletions(get_declared_classes(),
-                                               $info->symbol, TRUE);
-      $completions = array_map(function($name) { return $name . '('; },
-                               $completions);
-      if ($annotate) {
-        $annotations = $this->annotateClasses($completions);
-      }
+      $source = new Completions\ClassConstructors;
       break;
 
     case CompletionParser::COMPLETE_SYMBOL:
       $this->stripInitialSlash($info);
-      /* Constants are case sensitive, but other names are not. */
-      $constants = $this->filterCompletions(array_keys(get_defined_constants()),
-                                            $info->symbol);
-      $symbols = $this->filterCompletions($this->bareSymbols(),
-                                          $info->symbol, TRUE);
-      $completions = array_merge($constants, $symbols);
-      if ($annotate) {
-        $annotations = $this->annotateFunctions($completions);
-      }
+      $source = new Completions\BareNames;
       break;
 
     default:
@@ -119,13 +73,34 @@ class Completer {
         "Unexpected value %s returned from getCompletionInfo",
         $info->how));
     }
+    if (!$source) {
+      $source = new Completions\None;
+    }
+    
+    $completions = $source->completions($info->symbol);
+    $strings = array_map(function ($symbol) { return (string) $symbol; }, $completions);
     $response = array('start' => $info->start,
                       'end' => $info->end,
-                      'completions' => $completions);
+                      'completions' => $strings);
+
     if ($annotate) {
+      $annotations = array();
+      foreach ($completions as $candidate) {
+// FIXME
+        $annotations[(string) $candidate] = $candidate->annotate();
+      }
       $response['annotations'] = $annotations;
     }
     return $response;
+  }
+
+  function apropos($word, $kinds = array()) {
+    $source = new Completions\AllSymbols;
+    $data = array();
+    foreach ($source->apropos($word) as $symbol) {
+      $data[] = $symbol->annotate();
+    }
+    return $data;
   }
 
   /**
@@ -138,7 +113,7 @@ class Completer {
     $refl = $this->getReflectionObject($info, $evaluate, $scope);
     if(!$refl) return NULL;
     try {
-      return $this->formatFunction($refl, $info->arg);
+      return $this->formatSignature($refl, $info->arg);
     } catch(\ReflectionException $e) {
       return NULL;
     }
@@ -189,16 +164,10 @@ class Completer {
       return NULL;
     }
   }
-  
 
-
-  /**********************************************************************
-   *
-   * Private methods for performing completion
-   *
-   **********************************************************************/
-
-  /* Handle an annoying special case with absolutely qualified names */
+  /**
+   * Handle an annoying special case with absolutely qualified names
+   */
   private function stripInitialSlash(&$info) {
     if(strlen($info->symbol) && $info->symbol[0] == '\\') {
       $info->start += 1;
@@ -223,184 +192,6 @@ class Completer {
       return $result;
     }
   }
-
-  /**
-   * Filter completion candidates by prefix.
-   */
-  private function filterCompletions($candidates, $prefix, $case_fold = FALSE) {
-    if(strlen($prefix) == 0) return $candidates;
-    $filtered = array();
-    if($case_fold) {
-      $prefix_length = strlen($prefix);
-      foreach($candidates as $candidate) {
-        if (strpos(strtolower($candidate), strtolower($prefix)) === 0) {
-          $filtered[] = $prefix . substr($candidate, $prefix_length);
-        }
-      }
-    } else {
-      foreach($candidates as $candidate) {
-        if (strpos($candidate, $prefix) === 0) {
-          $filtered[] = $candidate;
-        }
-      }
-    }
-    return $filtered;
-  }
-
-  /**
-   * Return the names of all defined classes, interfaces, functions,
-   * and special constructs.
-   */
-  private function bareSymbols() {
-    $classes = get_declared_classes();
-    $interfaces = get_declared_interfaces();
-    $functions = array();
-    foreach(get_defined_functions() as $type => $names) {
-      foreach($names as $name) {
-        $functions[] = $name . "(";
-      }
-    }
-    return array_merge(self::$PHP_KEYWORDS, $classes, $interfaces, $functions);
-  }
-
-  /**
-   * Return the names of properties and methods of an object.
-   * These are the symbols which can appear after the -> operator.
-   *
-   * Properties are case sensitive, but methods are not.
-   */
-  private function objectMembers($obj) {
-    if(!is_object($obj)) return array(array(), array());
-    try {
-      $refl = new \ReflectionObject($obj);
-      $methods = array_map(function ($method) { return $method->name . '('; },
-                           $refl->getMethods(\ReflectionMethod::IS_PUBLIC));
-      $properties = array_map(function ($prop) { return $prop->name; },
-                              $refl->getProperties(\ReflectionProperty::IS_PUBLIC));
-
-      return array($properties, $methods);
-    } catch(\ReflectionException $e) {
-      return array(array(), array());
-    }
-  }
-
-  /**
-   * Return the static methods, properties and constants of an object or class.
-   * These are the symbols which can appear after the :: operator.
-   *
-   * Properties and constants are case sensitive, but methods are not.
-   * TODO: Merge objectMembers and staticMembers together
-   */
-  private function staticMembers($obj) {
-    try {
-      $refl = new \ReflectionClass($obj);
-
-      $methods = array_map(function ($method) { return $method->name . '('; },
-                           $refl->getMethods(\ReflectionMethod::IS_STATIC));
-      $properties = array_merge(array_keys($refl->getConstants()),
-                                array_map(function ($prop_name) { return '$' . $prop_name; },
-                                          array_keys($refl->getStaticProperties())));
-      return array($properties, $methods);
-
-    } catch(\ReflectionException $e) {
-      return array(array(), array());
-    }
-  }
-
-  /**
-   * Return the first line of a documentation comment, if any.
-   */
-  private static function getDocstring(\Reflector $refl) {
-    $doc_comment = $refl->getDocComment();
-    if ($doc_comment) {
-      if (preg_match('|/[*][*]\s*\n\s*[*]\s*(.*)$|m', $doc_comment, $matches)) {
-        return $matches[1];
-      }
-    }
-    return '';
-  }
-
-  private function annotateMembers($obj, $properties, $methods) {
-    $annotations = array();
-    try {
-      if (is_object($obj)) {
-        $refl = new \ReflectionObject($obj);
-      } else {
-        $refl = new \ReflectionClass($obj);
-      }
-      foreach ($methods as $method) {
-        // Strip trailing "("
-        $name = preg_replace('|[(]\Z|', '', $method);
-        $member_refl = $refl->getMethod($name);
-        $annotations[$method] = array(
-          'description' => $this->getDocstring($member_refl),
-          'arguments' => $this->formatFunctionArguments($member_refl, -1),
-          'file' => $member_refl->getFileName(),
-          'line' => $member_refl->getStartLine(),
-          );
-      }
-
-      foreach ($properties as $property) {
-        if ($refl->getConstant($property)) continue;
-        // Strip leading "$" on static properties
-        $name = preg_replace('|\A[$]|', '', $property);
-        $member_refl = $refl->getProperty($name);
-        $class_refl = $member_refl->getDeclaringClass();
-        $annotations[$property] = array(
-          'description' => $this->getDocstring($member_refl),
-          'arguments' => '',
-          'file' => $class_refl->getFileName(),
-          'line' => $class_refl->getStartLine(),
-          );
-      }
-    } catch(\ReflectionException $e) {
-    }
-    return $annotations;
-  }
-
-  private function annotateFunctions($candidates) {
-    return $this->annotateFunctionsOrClasses($candidates, false);
-  }
-
-  private function annotateClasses($candidates) {
-    return $this->annotateFunctionsOrClasses($candidates, true);
-  }
-
-  private function annotateFunctionsOrClasses($candidates, $as_classes) {
-    if ($as_classes) {
-      $check_function = 'class_exists';
-      $reflection_class = 'ReflectionClass';
-    } else {
-      $check_function = 'function_exists';
-      $reflection_class = 'ReflectionFunction';
-    }
-
-    $annotations = array();
-    foreach ($candidates as $candidate) {
-      $name = preg_replace('|[(]\Z|', '', $candidate);
-      if (!$check_function($name)) continue;
-      try {
-        $refl = new $reflection_class($name);
-        $data = array(
-          'file' => $refl->getFileName(),
-          'line' => $refl->getStartLine(),
-          'arguments' => '',
-          'description' => $this->getDocstring($refl),
-        );
-        $refl_method = $as_classes ? $refl->getConstructor() : $refl;
-        if ($refl_method) {
-          $data['arguments'] = $this->formatFunctionArguments($refl_method);
-          if (!$data['description']) {
-            $data['description'] = $this->getDocstring($refl_method);
-          }
-        }
-        $annotations[$candidate] = $data;
-      } catch(\ReflectionException $e) {
-      }
-    }
-    return $annotations;
-  }
-
 
   /**********************************************************************
    *
@@ -442,65 +233,4 @@ class Completer {
       return NULL;
     }
   }
-
-  /**
-   * Format information about function / method arguments, for getHint()
-   */
-  private static function formatFunction($refl, $arg = -1) {
-    $arguments = self::formatFunctionArguments($refl, $arg);
-    $reference = $refl->returnsReference() ? '&' : '';
-    $name = $refl instanceof \ReflectionMethod && $refl->isConstructor()
-      ? $refl->getDeclaringClass()->name
-      : $refl->name;
-
-    return "{$reference}{$name}({$arguments})";
-  }
-
-  private static function formatFunctionArguments(\ReflectionFunctionAbstract $refl, $arg = -1) {
-    $params   = $refl->getParameters();
-    $n        = $refl->getNumberOfRequiredParameters();
-    $required = array_slice($params, 0, $n);
-    $optional = array_slice($params, $n);
-
-    if (count($optional) && count($required)) {
-      return sprintf('%s[, %s]',
-                     self::formatParams($required, $arg),
-                     self::formatParams($optional, $arg));
-    } else if(count($required)) {
-      return self::formatParams($required, $arg);
-    } else if (count($optional)) {
-      return sprintf('[%s]',
-                     self::formatParams($optional, $arg)); 
-    } else {
-      return '';
-    }
-  }
-
-  private static function formatParams(array $params, $index) {
-    $args = array_map(function (\ReflectionParameter $param = NULL) use ($index) {
-      try {
-        $refl_class = $param->getClass();
-        if($refl_class)
-          $class = $refl_class->getName() . ' ';
-        else
-          $class = '';
-      } catch (\ReflectionException $e) {
-        $class = '';
-      }
-      $reference   = $param->isPassedByReference() ? '&' : '';
-      $var         = $reference . $param->name;
-      $highlighted = ($param->getPosition() == $index) ? strtoupper($var) : $var;
-      $arg         = "{$class}\${$highlighted}";
-
-      if($param->isDefaultValueAvailable()) {
-        $default = var_export($param->getDefaultValue(), TRUE);
-        $default = preg_replace('/\s+/', ' ', $default);
-        return "{$arg} = {$default}";
-      } else {
-        return $arg;
-      }
-    }, $params);
-    return implode(', ', $args);
-  }
-
 }
