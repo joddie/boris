@@ -298,17 +298,19 @@
 ;;;###autoload
 (defun boris-completion-at-point ()
   (when (boris-connected-p)
-    (let* ((line (buffer-substring-no-properties (point-at-bol) (point)))
-           (evaluate-p (eq major-mode 'boris-mode))
-           (response
+    (let ((line (buffer-substring-no-properties (point-at-bol) (point)))
+          (evaluate-p (eq major-mode 'boris-mode)))
+      (if (string-match-p "\\`[[:space:]]*\\'" line)
+          ;; Bail out at beginning of line
+          nil
+        (cl-destructuring-bind (&key start end completions)
             (boris-call (list :operation :complete
-                              :line line
-                              :evaluate evaluate-p))))
-      (cl-destructuring-bind (&key start end completions) response
-        (when completions
-          (list
-           (+ (point-at-bol) start) (+ (point-at-bol) end)
-           completions))))))
+                           :line line
+                           :evaluate evaluate-p))
+          (when completions
+            (list
+             (+ (point-at-bol) start) (+ (point-at-bol) end)
+             completions)))))))
 
 ;;;###autoload
 (defun boris-eldoc-function ()
