@@ -203,35 +203,41 @@
 
 (defun boris-call (data &optional callback)
   (process-send-string boris-process (boris-pack-request data))
-  (if callback
-      ;; Handle asynchronously -- mostly for ElDoc
-      (add-hook 'boris-async-callbacks callback t)
-    ;; Wrap with synchronous waiting and timeout
-    (let ((response nil) 
-          (success nil)
-          (timed-out nil))
-      ;; Success callback
-      (add-hook 'boris-async-callbacks
-                (lambda (received)
-                  (if (not timed-out)
-                      (setq response received
-                            success t)
-                    (message "Discarded message handled after timeout."))) t)
-      ;; Timeout callback
-      (let ((timer
-             (run-with-timer boris-hard-timeout nil
-                             (lambda () (setq timed-out t))))
-            (message "Waiting for Boris response.."))
-        ;; Wait...
+  (cl-flet ((enqueue (callback)
+              (setq boris-async-callbacks
+                    (append boris-async-callbacks
+                            (list callback)))))
+    (if callback
+        ;; Handle asynchronously -- mostly for ElDoc
+        (enqueue callback)
+      ;; Wrap with synchronous waiting and timeout
+      (let* ((response nil)
+             (success nil)
+             (timed-out nil)
+             (message "Waiting for Boris response..")
+             ;; Timeout callback
+             (timer
+              (run-with-timer boris-hard-timeout nil
+                              (lambda () (setq timed-out t)))))
+        ;; Success callback
+        (enqueue
+         (lambda (received)
+           (cancel-timer timer)
+           (if (not timed-out)
+               (progn
+                 (boris-log "Synchronous callback" received)
+                 (setq response received
+                       success t))
+             (message "Discarded message handled after timeout."))
+           (boris-log-status)))
+        ;; Wait ...
         (while (not (or success timed-out))
           (accept-process-output boris-process boris-timeout)
           (unless success
             (setq message (concat message "."))
             (message "%s" message)))
         (if success
-            (progn
-              (cancel-timer timer)
-              response)
+            response
           (message "%s" (concat message "timed out."))
           nil)))))
 
