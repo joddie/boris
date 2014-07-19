@@ -346,16 +346,17 @@ class EvalWorker {
       }
 
       $unpacked = unpack('N', $buf);
-      $length = 4 + $unpacked[1];
+      $json_length = $unpacked[1];
+      $msg_length = 4 + $unpacked[1];
 
-      if (strlen($buf) < $length) {
+      if (strlen($buf) < $msg_length) {
         /* Incomplete message  */
         continue;
       }
 
-      $serialized = substr($buf, 4);
+      $serialized = substr($buf, 4, $json_length);
       $unserialized = json_decode($serialized);
-      $buf = substr($buf, $length);
+      $buf = substr($buf, $msg_length);
       return array($unserialized, $id == (int) $this->_socket ? $this->_socket : $this->_clients[$id]);
     }
     return null;
