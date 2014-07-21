@@ -753,7 +753,11 @@ function."
   (add-to-list 'compilation-error-regexp-alist-alist
                '(boris-php-backtrace
                  "^PHP.* \\(/[^:]+\\):\\([0-9]+\\)" 1 2 nil nil))
-  (add-to-list 'compilation-error-regexp-alist 'boris-php-backtrace))
+  (add-to-list 'compilation-error-regexp-alist-alist
+               '(xdebug-error
+                 "^\\(?:Error\\|Warning\\|Notice\\): .* in \\(.*\\) on line \\([0-9]+\\)$" 1 2 nil nil))
+  (add-to-list 'compilation-error-regexp-alist 'boris-php-backtrace)
+  (add-to-list 'compilation-error-regexp-alist 'xdebug-error))
 
 ;;;###autoload
 (eval-after-load 'php-mode
