@@ -153,6 +153,11 @@ class EvalWorker {
         $__response = $this->_packResponse($return);
         break;
 
+      case 'apropos':
+        $return = $this->_completer->apropos($input->regexp, $__scope);
+        $__response = $this->_packResponse($return);
+        break;
+        
       default:
         throw new \RuntimeException(sprintf("Bad operation '%s'", $input->operation));
         $__response = self::DONE;

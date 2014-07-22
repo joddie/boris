@@ -94,13 +94,14 @@ class Completer {
     return $response;
   }
 
-  function apropos($word, $kinds = array()) {
-    $source = new Completions\AllSymbols;
-    $data = array();
-    foreach ($source->apropos($word) as $symbol) {
-      $data[] = $symbol->annotate();
-    }
-    return $data;
+  /**
+   * Search all symbols and return full details.
+   */
+  function apropos($filter, $scope, $kinds = array()) {
+    $source = new Completions\AllSymbols($scope);
+    return array_map(function ($symbol) { 
+      return $symbol->annotate();
+    }, $source->apropos($filter));
   }
 
   /**

@@ -515,22 +515,76 @@ class ClassConstants implements Source {
  * Trait for combining across all defined classes/interfaces/traits
  */
 trait ForAllClasses {
-  abstract function source(Symbol $name);
+  abstract function source(Symbol $class);
+  protected function groupBy(Symbol $member) {
+    return (string) $member;
+  }
 
   public function symbols() {
     $classlikes = new MergeSources(array(
       new ClassNames, new Interfaces, new Traits
     ));
-    $value = array();
+    $groups = array();
     foreach ($classlikes->symbols() as $class) {
       $source = $this->source($class);
       if ($source) {
         foreach ($source->symbols() as $symbol) {
-          $value[] = $symbol;
+          $groups[$this->groupBy($symbol)][] = $symbol;
         }
       }
     }
-    return $value;
+
+    $values = array();
+    foreach ($groups as $hash => $group) {
+      if (count($group) === 1) {
+        $values[] = $group[0];
+      } else {
+        $values[] = new MultiSymbol($group);
+        /* print count($group) . " values in bucket '" . $hash . "'\n"; */
+        /* print_r($group); */
+        /* foreach($group as $i => $x) { echo $i, "\t", spl_object_hash($x), "\n"; } */
+        /* echo count($group), "\n"; */
+        /* new MergedSymbol($group); */
+      }
+    }
+    return $values;
+  }
+}
+
+/** 
+ * Represent a number of symbols of the same name and kind grouped
+ * together for apropos purposes.
+ *
+ * For example, all zero-argument constructors, __construct(), or all
+ * instance properties called '$name'.
+ */
+class MultiSymbol implements Symbol {
+  private $symbols;
+  public function __construct(array $symbols) {
+    assert (count($symbols));
+    foreach($symbols as $symbol) {
+      assert ($symbol instanceof Symbol);
+    }
+    $this->symbols = $symbols;
+  }
+
+  public function kind() {
+    $this->symbols[0]->kind();
+  }
+
+  public function __toString() {
+    return (string) $this->symbols[0];
+  }
+
+  public function annotate() {
+    $info = $this->symbols[0]->annotate();
+    unset($info['file']);
+    unset($info['line']);
+    unset($info['defined_in']);
+    foreach ($this->symbols as $symbol) {
+      $info['definitions'][] = $symbol->annotate();
+    }
+    return $info;
   }
 }
 
@@ -538,6 +592,10 @@ class AllMethods implements Source {
   use CaseInsensitive, ForAllClasses;
   protected function source($name) {
     return new Methods((string) $name);
+  }
+  protected function groupBy(Symbol $symbol) {
+    $info = $symbol->annotate();
+    return $info['name'] . $info['arguments'];
   }
 }
 
@@ -603,7 +661,7 @@ class AllSymbols extends MergeSources {
  * Trait for symbol types with no annotation information
  */
 trait AnnotateBasic {
-  public function annotateBasic() {
+  protected function annotateBasic() {
     return array(
       'name' => (string) $this,
       'kind' => $this->kind(),
@@ -717,7 +775,7 @@ trait AnnotateClass {
   use AnnotateBasic, AnnotateLocation, AnnotateDocstring;
   public function annotate() {
     $refl = new \ReflectionClass($this->name);
-    return $this->annotateBasic($refl)
+    return $this->annotateBasic()
       + $this->annotateLocation($refl)
       + $this->annotateDocstring($refl);
   }
@@ -784,7 +842,7 @@ class FunctionName implements Symbol {
   function kind() { return 'function'; }
   function annotate() {
     $refl = new \ReflectionFunction($this->name);
-    return $this->annotateBasic($refl)
+    return $this->annotateBasic()
       + $this->annotateLocation($refl)
       + $this->annotateDocstring($refl)
       + $this->annotateSignature($refl);
@@ -811,19 +869,21 @@ class TraitName implements Symbol {
     
 // Class name used as constructor
 class ClassConstructor implements Symbol {
-  use SimpleSymbol, CallSymbol, AnnotateSignature;
+  use SimpleSymbol, CallSymbol, AnnotateBasic, AnnotateLocation, AnnotateDocstring, AnnotateSignature;
 
   public function kind() { return 'class'; }
   public function annotate() {
     $refl = new \ReflectionClass($this->name);
-    $info = $this->annotateBasic($refl);
+    $info = $this->annotateBasic() 
+      + $this->annotateLocation($refl)
+      + $this->annotateDocstring($refl);
+
     $constructor = $refl->getConstructor();
     if ($constructor) {
-      $constructor_info = $this->annotateSignature($constructor);
-      $info['arguments'] = $constructor_info['arguments'];
+      $info += $this->annotateSignature($constructor);
  
       if (empty($info['description'])) {
-        $info['description'] = $constructor_info['description'];
+        $info += $this->annotateDocstring($constructor);
       }
     }
     return $info;
@@ -846,30 +906,26 @@ trait ContextSymbol {
 }
 
 trait AnnotateMethod {
-  use AnnotateBasic, AnnotateSignature, AnnotateDeclaringClass;
+  use AnnotateBasic, AnnotateDocstring, AnnotateLocation, AnnotateSignature, AnnotateDeclaringClass;
   function annotate() {
     $refl = $this->context->getMethod($this->name);
-    return $this->annotateBasic($refl)
+    return $this->annotateBasic()
+      + $this->annotateDocstring($refl)
+      + $this->annotateLocation($refl)
       + $this->annotateSignature($refl)
       + $this->annotateDeclaringClass($refl);
   }
 }
 
 trait AnnotateProperty {
-  use AnnotateBasic, AnnotateDeclaringClass;
+  use AnnotateBasic, AnnotateDocstring, AnnotateLocation, AnnotateDeclaringClass;
   function annotate() {
     $property = $this->context->getProperty($this->name);
     $class = $property->getDeclaringClass();
-    $property_info = $this->annotateBasic($property);
-    $class_info = $this->annotateBasic($class);
-    $info = $class_info;
-    $info['description'] = $property_info['description'];
-    
-    return $this->annotateDeclaringClass() + array(
-      'file' => $class_info['file'],
-      'line' => $class_info['line'],
-      'description' => $property_info['description'],
-    );
+    return $this->annotateBasic()
+      + $this->annotateDocstring($property)
+      + $this->annotateLocation($class)
+      + $this->annotateDeclaringClass($property);
   }
 }
   

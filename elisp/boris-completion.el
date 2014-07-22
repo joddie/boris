@@ -273,6 +273,7 @@
                 (throw 'done t)
               (let* ((json-object-type 'plist)
                      (json-array-type 'list)
+                     (json-false nil)
                      (response
                       (json-read-from-string (bindat-get-field unpacked :data)))
                      (read-chars
@@ -403,9 +404,13 @@
   :lighter (:eval (boris-mode-line-process))
   :keymap
   `((,(kbd "C-c C-z") . boris-open-or-pop-to-repl)
-    (,(kbd "C-c C-d") . boris-get-documentation)
+    (,(kbd "C-c C-d C-d") . boris-get-documentation)
+    (,(kbd "C-c C-d d") . boris-get-documentation)
     (,(kbd "C-c C-/") . boris-get-documentation)
-    (,(kbd "C-c C-k") . boris-load-file))
+    (,(kbd "C-c C-k") . boris-load-file)
+    (,(kbd "C-c C-l") . boris-load-file)
+    (,(kbd "C-c C-d C-a") . boris-apropos)
+    (,(kbd "C-c C-d a") . boris-apropos))
 
   (if boris-minor-mode
       ;; turn on 
@@ -745,6 +750,83 @@ function."
              (let ((key-string (substring (symbol-name key) 1)))
                (puthash key-string value table)))
     table))
+
+
+;;;; Apropos
+
+(define-derived-mode boris-apropos-mode special-mode
+  "Boris Apropos"
+  "Major mode for Boris symbol lookup buffers.")
+
+(defvar boris-apropos-mode-map
+  (make-composed-keymap special-mode-map button-buffer-map))
+
+(defvar boris-apropos-history nil)
+
+(defun boris-apropos (regexp)
+  (interactive
+   (list
+    (let ((default (thing-at-point 'symbol)))
+      (read-string
+       (if default
+           (format "Boris apropos (default `%s'): " default)
+         "Boris apropos: ")
+       nil boris-apropos-history default))))
+  (let ((tags
+         (boris-call (list :operation :apropos
+                           :regexp regexp))))
+    (with-current-buffer (get-buffer-create "*boris apropos*")
+      (boris-apropos-mode)
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (save-excursion
+          (dolist (tag tags)
+            (boris-insert-tag tag)
+            (newline)))
+        (pop-to-buffer (current-buffer))))))
+
+(defun boris-insert-tag (tag)
+  (cl-destructuring-bind (&key kind name file line description arguments defined_in
+                            definitions)
+      tag
+    (cl-flet ((insert-xref (label file line)
+                (if (and file line)
+                    (insert-text-button
+                     label
+                     'type 'boris-apropos
+                     'boris-file file
+                     'boris-line line)
+                  (insert label))))
+      (let ((label (format "%s %s%s" kind name (or arguments ""))))
+        (insert-xref label file line)
+        (newline))
+      (when description
+        (insert (format "  %s\n" description)))
+      (when defined_in
+        (insert (format "  defined in %s\n" defined_in)))
+      (when definitions
+        (insert (format "  defined in "))
+        (dolist (definition definitions)
+          (cl-destructuring-bind (&key file line defined_in &allow-other-keys)
+              definition
+            (insert-xref defined_in file line))
+          (insert ", "))
+        ;; hack
+        (delete-region (- (point) 2) (point))
+        (newline)))))
+
+(define-button-type 'boris-apropos
+    'help-echo "mouse-2, RET: Visit definition"
+    'follow-link t
+    'action 'boris-apropos-follow-link)
+
+(defun boris-apropos-follow-link (button)
+  (let ((file (button-get button 'boris-file))
+        (line (button-get button 'boris-line)))
+    (with-current-buffer (find-file file)
+      (widen)
+      (goto-char (point-min))
+      (forward-line (1- line)))))
 
 
 
