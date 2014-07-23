@@ -224,12 +224,9 @@
          (lambda (received)
            (cancel-timer timer)
            (if (not timed-out)
-               (progn
-                 (boris-log "Synchronous callback" received)
-                 (setq response received
-                       success t))
-             (message "Discarded message handled after timeout."))
-           (boris-log-status)))
+               (setq response received
+                     success t)
+             (message "Discarded message handled after timeout."))))
         ;; Wait ...
         (while (not (or success timed-out))
           (accept-process-output boris-process boris-timeout)
