@@ -32,6 +32,7 @@ class CompletionParser {
             || ($match = $this->popMatch($tokens, array(T_DOUBLE_COLON)))) {
       $operator = $match[0];
       $context = $this->getContext($tokens);
+      if (!$context) return NULL;
       if($operator->type == T_OBJECT_OPERATOR) {
         return $this->completionInfo(self::COMPLETE_MEMBER, $context, $line_end);
       } else {
