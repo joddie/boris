@@ -654,14 +654,29 @@ function."
     ;; Not running: try to restart.
     (call-interactively #'boris)))
 
+(defun boris-restart ()
+  "Kill any running boris process and restart it."
+  (interactive)
+  (boris-kill-processes)
+  (call-interactively #'boris))
+
 (defun boris-query-kill-if-running ()
   (when (boris-comint-running-p)
     (if (yes-or-no-p "Boris already running. Kill process and start new REPL?")
-        (progn
-          (delete-process boris-comint-process)
-          (when (boris-connected-p)
-            (delete-process boris-process)))
+        (boris-kill-processes)
       (error "Boris already running."))))
+
+(defun boris-kill-processes ()
+  (when (boris-comint-running-p)
+    ;; Try clean shutdown first
+    (process-send-eof boris-comint-process)
+    (sit-for 0.1)
+    ;; Kill process if clean shutdown failed
+    (when (boris-comint-running-p)
+      (delete-process boris-comint-process)))
+  ;; Disconnect side-channel
+  (when (boris-connected-p)
+    (delete-process boris-process)))
 
 
 ;;; Company-mode integration
