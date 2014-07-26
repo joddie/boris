@@ -619,7 +619,11 @@ work as normal."
       ;; restarting the REPL via boris-restart-or-pop-back will re-run
       ;; the same command.
       (setq-local boris-command program)
-      (setq-local boris-args arguments))
+      (setq-local boris-args arguments)
+      ;; Restore input history from Boris's history file if possible
+      (let ((comint-input-ring-file-name (expand-file-name "~/.boris_history"))
+            (comint-input-history-ignore (regexp-quote "_HiStOrY_V2_")))
+        (comint-read-input-ring t)))
     comint-buffer))
 
 (defun boris-wait-and-connect (process string)
