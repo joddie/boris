@@ -514,9 +514,11 @@
   (if (< emacs-major-version 24)
       'comint-dynamic-complete
     'completion-at-point))
-(define-key boris-mode-map (kbd "C-c C-d") 'boris-get-documentation)
-(define-key boris-mode-map (kbd "C-c d")   'boris-get-documentation)
+(define-key boris-mode-map (kbd "C-c C-d C-d") 'boris-get-documentation)
+(define-key boris-mode-map (kbd "C-c C-d d")   'boris-get-documentation)
 (define-key boris-mode-map (kbd "C-c C-/") 'boris-get-documentation)
+(define-key boris-mode-map (kbd "C-c C-d C-a") 'boris-apropos)
+(define-key boris-mode-map (kbd "C-c C-d a") 'boris-apropos)
 (define-key boris-mode-map (kbd "C-c C-z") 'boris-restart-or-pop-back)
 
 ;;;###autoload
