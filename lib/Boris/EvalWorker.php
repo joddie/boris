@@ -117,69 +117,58 @@ class EvalWorker {
         continue;
       }
 
-      switch ($input->operation) {
-      case 'evaluate':
-        /* Expression evaluation */
+      if ($input->operation == 'evaluate') {
+        // Evaluation returns a one-byte success-or-failure code
         $__response = $this->_evalAndPrint($input->statement, $__scope);
-        break;
+      } else {
+        // Documentation lookup and cross-reference commands return JSON data
+        switch ($input->operation) {
+        case 'complete':
+          $return = $this->_completer->getCompletions($input->line, $input->evaluate, $__scope);
+          break;
 
-      case 'complete':
-        $return = $this->_completer->getCompletions($input->line, $input->evaluate, $__scope);
-        $__response = $this->_packResponse($return);
-        break;
+        case 'annotate':
+          $return = $this->_completer->getCompletions($input->line, $input->evaluate, $__scope, true);
+          break;
 
-      case 'annotate':
-        $return = $this->_completer->getCompletions($input->line, $input->evaluate, $__scope, true);
-        $__response = $this->_packResponse($return);
-        break;
+        case 'hint':
+          $return = $this->_completer->getHint($input->line, $input->evaluate, $__scope);
+          break;
 
-      case 'hint':
-        $return = $this->_completer->getHint($input->line, $input->evaluate, $__scope);
-        $__response = $this->_packResponse($return);
-        break;
+        case 'documentation':
+          $return = $this->_completer->getDocumentation($input->line, $input->evaluate, $__scope);
+          break;
 
-      case 'documentation':
-        $return = $this->_completer->getDocumentation($input->line, $input->evaluate, $__scope);
-        $__response = $this->_packResponse($return);
-        break;
+        case 'shortdoc':
+          $return = $this->_completer->getShortDocumentation($input->line, $input->evaluate, $__scope);
+          break;
 
-      case 'shortdoc':
-        $return = $this->_completer->getShortDocumentation($input->line, $input->evaluate, $__scope);
-        $__response = $this->_packResponse($return);
-        break;
+        case 'location':
+          $return = $this->_completer->getLocation($input->line, $input->evaluate, $__scope);
+          break;
 
-      case 'location':
-        $return = $this->_completer->getLocation($input->line, $input->evaluate, $__scope);
-        $__response = $this->_packResponse($return);
-        break;
-
-      case 'apropos':
-        $return = $this->_completer->apropos($input->regexp, $__scope);
-        $__response = $this->_packResponse($return);
-        break;
+        case 'apropos':
+          $return = $this->_completer->apropos($input->regexp, $__scope);
+          break;
         
-      case 'whouses':
-        $return = $this->_completer->whoUses($input->trait);
-        $__response = $this->_packResponse($return);
-        break;
+        case 'whouses':
+          $return = $this->_completer->whoUses($input->trait);
+          break;
 
-      case 'whoimplements':
-        $return = $this->_completer->whoImplements($input->interface);
-        $__response = $this->_packResponse($return);
-        break;
+        case 'whoimplements':
+          $return = $this->_completer->whoImplements($input->interface);
+          break;
 
-      case 'whoextends':
-        $return = $this->_completer->whoExtends($input->class);
-        $__response = $this->_packResponse($return);
-        break;
+        case 'whoextends':
+          $return = $this->_completer->whoExtends($input->class);
+          break;
 
-      default:
-        throw new \RuntimeException(sprintf("Bad operation '%s'", $input->operation));
-        $__response = self::DONE;
+        default:
+          throw new \RuntimeException(sprintf("Bad operation '%s'", $input->operation));
+        }
+        $__response = $this->_packResponse($return);
       }
-
       $this->_write($client, $__response);
-      
       if ($__response == self::EXITED) {
         exit(0);
       }
