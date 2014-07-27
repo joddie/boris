@@ -53,11 +53,11 @@ class Completer {
       $source = new Completions\Variables($scope);
       break;
 
-    case CompletionParser::COMPLETE_INDEX:
-      $context = $this->getLiveContext($info->context, $evaluate, $scope);
-      $source = new Completions\ArrayIndices($context);
-      break;
-      
+    /* case CompletionParser::COMPLETE_INDEX: */
+    /*   $context = $this->getLiveContext($info->context, $evaluate, $scope); */
+    /*   $source = new Completions\ArrayIndices($context); */
+    /*   break; */
+
     case CompletionParser::COMPLETE_CLASS:
       $this->stripInitialSlash($info);
       $source = new Completions\ClassConstructors;
