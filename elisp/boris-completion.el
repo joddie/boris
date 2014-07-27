@@ -403,14 +403,20 @@
     "Minor mode for completion and Eldoc via Boris in PHP buffers."
   :lighter (:eval (boris-mode-line-process))
   :keymap
-  `((,(kbd "C-c C-z") . boris-open-or-pop-to-repl)
+  `((,(kbd "C-c C-z")     . boris-open-or-pop-to-repl)
     (,(kbd "C-c C-d C-d") . boris-get-documentation)
-    (,(kbd "C-c C-d d") . boris-get-documentation)
-    (,(kbd "C-c C-/") . boris-get-documentation)
-    (,(kbd "C-c C-k") . boris-load-file)
-    (,(kbd "C-c C-l") . boris-load-file)
+    (,(kbd "C-c C-d d")   . boris-get-documentation)
+    (,(kbd "C-c C-/")     . boris-get-documentation)
+    (,(kbd "C-c C-k")     . boris-load-file)
+    (,(kbd "C-c C-l")     . boris-load-file)
     (,(kbd "C-c C-d C-a") . boris-apropos)
-    (,(kbd "C-c C-d a") . boris-apropos))
+    (,(kbd "C-c C-d a")   . boris-apropos)
+    (,(kbd "C-c C-w C-u") . boris-who-uses)
+    (,(kbd "C-c C-w u")   . boris-who-uses)
+    (,(kbd "C-c C-w C-i") . boris-who-implements)
+    (,(kbd "C-c C-w i")   . boris-who-implements)
+    (,(kbd "C-c C-w C-e") . boris-who-extends)
+    (,(kbd "C-c C-w e") . boris-who-extends))
 
   (if boris-minor-mode
       ;; turn on 
@@ -514,12 +520,18 @@
   (if (< emacs-major-version 24)
       'comint-dynamic-complete
     'completion-at-point))
+(define-key boris-mode-map (kbd "C-c C-z")     'boris-restart-or-pop-back)
 (define-key boris-mode-map (kbd "C-c C-d C-d") 'boris-get-documentation)
 (define-key boris-mode-map (kbd "C-c C-d d")   'boris-get-documentation)
-(define-key boris-mode-map (kbd "C-c C-/") 'boris-get-documentation)
+(define-key boris-mode-map (kbd "C-c C-/")     'boris-get-documentation)
 (define-key boris-mode-map (kbd "C-c C-d C-a") 'boris-apropos)
-(define-key boris-mode-map (kbd "C-c C-d a") 'boris-apropos)
-(define-key boris-mode-map (kbd "C-c C-z") 'boris-restart-or-pop-back)
+(define-key boris-mode-map (kbd "C-c C-d a")   'boris-apropos)
+(define-key boris-mode-map (kbd "C-c C-w C-u") 'boris-who-uses)
+(define-key boris-mode-map (kbd "C-c C-w u")   'boris-who-uses)
+(define-key boris-mode-map (kbd "C-c C-w C-i") 'boris-who-implements)
+(define-key boris-mode-map (kbd "C-c C-w i")   'boris-who-implements)
+(define-key boris-mode-map (kbd "C-c C-w C-e") 'boris-who-extends)
+(define-key boris-mode-map (kbd "C-c C-w e")   'boris-who-extends)
 
 ;;;###autoload
 (defun boris (&optional command)
@@ -787,15 +799,45 @@ function."
 (defun boris-apropos (regexp)
   (interactive
    (list
-    (let ((default (thing-at-point 'symbol)))
-      (read-string
-       (if default
-           (format "Boris apropos (default `%s'): " default)
-         "Boris apropos: ")
-       nil boris-apropos-history default))))
+    (boris--read-symbol "Search for PHP symbol (PCRE regexp)")))
   (let ((tags
          (boris-call (list :operation :apropos
                            :regexp regexp))))
+    (boris--show-tags-buffer tags)))
+
+(defun boris-who-implements (interface)
+  (interactive (list (boris--read-symbol "Interface")))
+  (boris--show-tags-buffer
+   (boris-call (list :operation :whoimplements
+                     :interface interface))))
+
+(defun boris-who-uses (trait)
+  (interactive
+   (list
+    (boris--read-symbol "Trait")))
+  (boris--show-tags-buffer
+   (boris-call (list :operation :whouses
+                     :trait trait))))
+
+(defun boris-who-extends (class)
+  (interactive
+   (list
+    (boris--read-symbol "Class")))
+  (boris--show-tags-buffer
+   (boris-call (list :operation :whoextends
+                     :class class))))
+
+(defun boris--read-symbol (prompt)
+  (let ((default (thing-at-point 'symbol)))
+    (read-string
+     (if default
+         (format "%s (default `%s'): " prompt default)
+       (format "%s: " prompt))
+     nil boris-apropos-history default)))
+
+(defun boris--show-tags-buffer (tags)
+  (if (zerop (length tags))
+      (message "No matching symbols")
     (with-current-buffer (get-buffer-create "*boris apropos*")
       (boris-apropos-mode)
       (let ((inhibit-read-only t))

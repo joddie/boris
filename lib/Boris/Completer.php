@@ -76,20 +76,15 @@ class Completer {
     if (!$source) {
       $source = new Completions\None;
     }
-    
+
     $completions = $source->completions($info->symbol);
     $strings = array_map(function ($symbol) { return (string) $symbol; }, $completions);
     $response = array('start' => $info->start,
                       'end' => $info->end,
-                      'completions' => $strings);
+                      'completions' => self::names($completions));
 
     if ($annotate) {
-      $annotations = array();
-      foreach ($completions as $candidate) {
-// FIXME
-        $annotations[(string) $candidate] = $candidate->annotate();
-      }
-      $response['annotations'] = $annotations;
+      $response['annotations'] = self::annotationMap($completions);
     }
     return $response;
   }
@@ -99,9 +94,68 @@ class Completer {
    */
   function apropos($filter, $scope, $kinds = array()) {
     $source = new Completions\AllSymbols($scope);
-    return array_map(function ($symbol) { 
+    return self::annotations($source->apropos($filter));
+  }
+
+  public function whoImplements($interface) {
+    assert (is_string($interface));
+    $source = new Completions\ClassNames;
+    return self::annotations(
+      array_filter($source->symbols(), function ($symbol) use ($interface) {
+      return $symbol->implementsInterface($interface);
+    }));
+  }
+
+  public function whoUses($trait) {
+    assert (is_string($trait));
+    $source = new Completions\MergeSources(array(
+      new Completions\ClassNames,
+      new Completions\Traits,
+    ));
+    return self::annotations(
+      array_filter($source->symbols(), function ($symbol) use ($trait) {
+      return $symbol->usesTrait($trait);
+    }));
+  }
+
+  public function whoExtends($class) {
+    assert (is_string($class));
+    $source = new Completions\ClassNames;
+    return self::annotations(
+      array_filter($source->symbols(), function ($symbol) use ($class) {
+          return $symbol->extendsClass($class);
+        }));
+  }
+
+  /**
+   * Return an array of each symbol's name.
+   */
+  private static function names(array $symbols) {
+    return array_values(array_map(function ($symbol) {
+      return (string) $symbol;
+    }, $symbols));
+  }
+
+  /**
+   * Return an array consisting of each symbol's annotation.
+   *
+   * TODO: Replace by having symbols implement JSONSerializable
+   */
+  private static function annotations(array $symbols) {
+    return array_values(array_map(function ($symbol) {
       return $symbol->annotate();
-    }, $source->apropos($filter));
+    }, $symbols));
+  }
+
+  /**
+   * Return an associative array mapping symbol names to annotations.
+   */
+  private static function annotationMap(array $symbols) {
+    $map = array();
+    foreach ($symbols as $symbol) {
+      $map[(string) $symbol] = $symbol->annotate();
+    }
+    return $map;
   }
 
   /**

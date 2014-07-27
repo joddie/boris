@@ -158,6 +158,21 @@ class EvalWorker {
         $__response = $this->_packResponse($return);
         break;
         
+      case 'whouses':
+        $return = $this->_completer->whoUses($input->trait);
+        $__response = $this->_packResponse($return);
+        break;
+
+      case 'whoimplements':
+        $return = $this->_completer->whoImplements($input->interface);
+        $__response = $this->_packResponse($return);
+        break;
+
+      case 'whoextends':
+        $return = $this->_completer->whoExtends($input->class);
+        $__response = $this->_packResponse($return);
+        break;
+
       default:
         throw new \RuntimeException(sprintf("Bad operation '%s'", $input->operation));
         $__response = self::DONE;

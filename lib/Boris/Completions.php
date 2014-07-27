@@ -779,6 +779,63 @@ trait AnnotateClass {
       + $this->annotateLocation($refl)
       + $this->annotateDocstring($refl);
   }
+
+  /**
+   * Return true if this class implements the given interface.
+   */
+  public function implementsInterface($interface) {
+    assert (is_string($interface));
+    $refl = new \ReflectionClass($this->name);
+    return self::anyNameMatches($refl->getInterfaceNames(), $interface);
+  }
+
+  /**
+   * Return true if this class uses the given trait.
+   */
+  public function usesTrait($trait) {
+    assert (is_string($trait));
+    $refl = new \ReflectionClass($this->name);
+    return self::anyNameMatches($refl->getTraitNames(), $trait);
+  }
+
+  /**
+   * Return true if this class extends the given superclass.
+   *
+   * This comparison is performed transitively: that is, if z extends
+   * y and y extends x, then z is considered to extend x.
+   */
+  public function extendsClass($super) {
+    assert (is_string($super));
+    $refl = new \ReflectionClass($this->name);
+    return self::anyNameMatches(self::ancestors($refl), $super);
+  }
+
+  /**
+   * Return all ancestors of the class represented by $refl.
+   */
+  private static function ancestors(\ReflectionClass $refl) {
+    $parent = $refl->getParentClass();
+    if (!$parent) return array();
+    return array_merge(array($parent->name), self::ancestors($parent));
+  }
+
+  /**
+   * True if a qualified name in $subjects matches $suffix.
+   * 
+   * The comparison is performed case-insensitively.  To match, the
+   * element of $subjects must either be equal to $suffix or must end
+   * in a backslash followed by $suffix.
+   */
+  static function anyNameMatches(array $subjects, $suffix) {
+    assert (is_string($suffix));
+    $lower = strtolower($suffix);
+    $regexp = '/' . preg_quote('\\' . $suffix, '/') . '\\Z/i';
+    return count(
+      array_filter($subjects, function ($subject) use ($lower, $regexp) {
+        return (strtolower($subject) == $lower)
+          || preg_match($regexp, $subject);
+      })) > 0;
+  }
 }
 
 /************************************************************
