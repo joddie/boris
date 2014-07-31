@@ -72,6 +72,14 @@
   :group 'boris)
 
 ;;;###autoload
+(defcustom boris-compilation-regexp-alist
+  '(php boris-php-backtrace xdebug-error xdebug-stacktrace)
+  "Value for `compilation-error-regexp-alist' in the Boris comint buffer.
+
+Set to nil to disable `compilation-shell-minor-mode' in Boris
+comint buffers.")
+
+;;;###autoload
 (defface boris-mode-line-run
     '((default :inherit compilation-mode-line-run))
   "Face for Boris's mode line indicator when Comint running but no connection."
@@ -558,7 +566,14 @@
   (when (require 'company nil t)
     (make-local-variable 'company-backends)
     (push #'boris-company company-backends)
-    (company-mode 1)))
+    (company-mode 1))
+
+  ;; Compilation errors
+  (when boris-compilation-regexp-alist
+    (make-local-variable 'compilation-error-regexp-alist)
+    (setq compilation-error-regexp-alist
+          boris-compilation-regexp-alist)
+    (compilation-shell-minor-mode)))
 
 (defvar boris-mode-syntax-table php-mode-syntax-table)
 
@@ -1003,10 +1018,7 @@ function."
                  "^\\(?:Error\\|Warning\\|Notice\\): .* in \\(.*\\) on line \\([0-9]+\\)$" 1 2 nil nil))
   (add-to-list 'compilation-error-regexp-alist-alist
                '(xdebug-stacktrace
-                 "\\([^ :]+\\):\\([0-9]+\\)+$" 1 2 nil nil))
-  (add-to-list 'compilation-error-regexp-alist 'boris-php-backtrace)
-  (add-to-list 'compilation-error-regexp-alist 'xdebug-error)
-  (add-to-list 'compilation-error-regexp-alist 'xdebug-stacktrace))
+                 "\\([^ :]+\\):\\([0-9]+\\)+$" 1 2 nil nil)))
 
 ;;;###autoload
 (eval-after-load 'php-mode
