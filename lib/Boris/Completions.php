@@ -699,6 +699,20 @@ trait AnnotateDocstring {
   }
 }
 
+trait AnnotateParent {
+  protected function annotateParent(\Reflector $refl) {
+    $parent = $refl->getParentClass();
+    if ($parent) {
+      return array(
+        'parent' => $parent->name,
+      );
+    } else { 
+      return array();
+    }
+  }
+}
+
+  
 /**
  * Annotate property/method with declaring class
  */
@@ -772,12 +786,13 @@ trait AnnotateSignature {
  * Annotate class, interface or trait name by reflection
  */
 trait AnnotateClass {
-  use AnnotateBasic, AnnotateLocation, AnnotateDocstring;
+  use AnnotateBasic, AnnotateLocation, AnnotateDocstring, AnnotateParent;
   public function annotate() {
     $refl = new \ReflectionClass($this->name);
     return $this->annotateBasic()
       + $this->annotateLocation($refl)
-      + $this->annotateDocstring($refl);
+      + $this->annotateDocstring($refl)
+      + $this->annotateParent($refl);
   }
 
   /**
@@ -813,10 +828,11 @@ trait AnnotateClass {
   /**
    * Return all ancestors of the class represented by $refl.
    */
-  private static function ancestors(\ReflectionClass $refl) {
+  private static function ancestors($refl) {
+    if (!$refl) return array();
+    assert ($refl instanceof \ReflectionClass);
     $parent = $refl->getParentClass();
-    if (!$parent) return array();
-    return array_merge(array($parent->name), self::ancestors($parent));
+    return array_merge(array($refl->name), self::ancestors($parent));
   }
 
   /**

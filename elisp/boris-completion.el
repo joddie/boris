@@ -396,27 +396,77 @@
    (point-at-bol)))
 
 
-;;;; Setup php-mode
+;;;; Minor mode for source buffers
+
+;; Convenience macros for defining 
+(defmacro boris-define-prefix-map (name bindings)
+  (declare (indent 1))
+  `(progn
+     (define-prefix-command ',name)
+     (boris-bind-keys ,name ,bindings)
+     ,name))
+
+;; Based on slime-bind-keys
+(defun boris-bind-keys (keymap bindings)
+  (cl-loop for (key command) in bindings do
+           (progn
+             (define-key keymap `[,key] command)
+             (unless (equal key ?h)
+               (define-key keymap `[(control ,key)] command)))))
+
+;; These prefix maps are reused for both the minor mode and comint mode
+(boris-define-prefix-map boris-who-map
+  '((?u boris-who-uses)
+    (?i boris-who-implements)
+    (?e boris-who-extends)))
+
+(boris-define-prefix-map boris-doc-map
+  '((?d boris-get-documentation)
+    (?a boris-apropos)))
+
+;; Menu items shared between minor mode and comint buffer
+(defvar boris-common-menu
+  '(["Load file..." boris-load-file t]
+    ["Help on thing at point" boris-get-documentation (boris-connected-p)]
+    ["Search symbols..." boris-apropos (boris-connected-p)]
+    ["Who implements..." boris-who-implements (boris-connected-p)]
+    ["Who extends..." boris-who-extends (boris-connected-p)]
+    ["Who uses..." boris-who-uses (boris-connected-p)]
+    ))
+
+(defvar boris-minor-mode-menu
+  `("Boris"
+    ["Open REPL" boris-open-or-pop-to-repl t]
+    ["Restart Boris" boris-restart t]
+    ["Connect to Boris" boris-connect (not (boris-connected-p))]
+    "--"
+    ,@boris-common-menu
+    ))
+
+(defvar boris-mode-menu
+  `("Boris"
+    ["" boris-restart-or-pop-back
+        :enable t
+        :label (if (and (boris-comint-running-p)
+                        boris-recent-buffer
+                        (buffer-live-p boris-recent-buffer))
+                   (format "Back to '%s'" (buffer-name boris-recent-buffer))
+                 "Start Boris")]
+    ["Restart Boris" boris-restart (boris-comint-running-p)]
+    ["Connect to Boris" boris-connect (not (boris-connected-p))]
+    "--"
+    ,@boris-common-menu
+    ))
 
 ;;;###autoload
 (define-minor-mode boris-minor-mode
     "Minor mode for completion and Eldoc via Boris in PHP buffers."
   :lighter (:eval (boris-mode-line-process))
   :keymap
-  `((,(kbd "C-c C-z")     . boris-open-or-pop-to-repl)
-    (,(kbd "C-c C-d C-d") . boris-get-documentation)
-    (,(kbd "C-c C-d d")   . boris-get-documentation)
-    (,(kbd "C-c C-/")     . boris-get-documentation)
-    (,(kbd "C-c C-k")     . boris-load-file)
-    (,(kbd "C-c C-l")     . boris-load-file)
-    (,(kbd "C-c C-d C-a") . boris-apropos)
-    (,(kbd "C-c C-d a")   . boris-apropos)
-    (,(kbd "C-c C-w C-u") . boris-who-uses)
-    (,(kbd "C-c C-w u")   . boris-who-uses)
-    (,(kbd "C-c C-w C-i") . boris-who-implements)
-    (,(kbd "C-c C-w i")   . boris-who-implements)
-    (,(kbd "C-c C-w C-e") . boris-who-extends)
-    (,(kbd "C-c C-w e") . boris-who-extends))
+  `((,(kbd "C-c C-z") . boris-open-or-pop-to-repl)
+    (,(kbd "C-c C-l") . boris-load-file)
+    (,(kbd "C-c C-d") . boris-doc-map)
+    (,(kbd "C-c C-w") . boris-who-map))
 
   (if boris-minor-mode
       ;; turn on 
@@ -439,11 +489,7 @@
 
 (easy-menu-define nil boris-minor-mode-map
   ""
-  '("Boris"
-    ["Connect" boris-connect (not (boris-connected-p))]
-    ["Open REPL" boris-open-or-pop-to-repl t]
-    ["Help on thing at point" boris-get-documentation (boris-connected-p)]
-    ["Load file" boris-load-file t]))
+  boris-minor-mode-menu)
 
 (defun boris-open-or-pop-to-repl ()
   (interactive)
@@ -520,18 +566,13 @@
   (if (< emacs-major-version 24)
       'comint-dynamic-complete
     'completion-at-point))
-(define-key boris-mode-map (kbd "C-c C-z")     'boris-restart-or-pop-back)
-(define-key boris-mode-map (kbd "C-c C-d C-d") 'boris-get-documentation)
-(define-key boris-mode-map (kbd "C-c C-d d")   'boris-get-documentation)
-(define-key boris-mode-map (kbd "C-c C-/")     'boris-get-documentation)
-(define-key boris-mode-map (kbd "C-c C-d C-a") 'boris-apropos)
-(define-key boris-mode-map (kbd "C-c C-d a")   'boris-apropos)
-(define-key boris-mode-map (kbd "C-c C-w C-u") 'boris-who-uses)
-(define-key boris-mode-map (kbd "C-c C-w u")   'boris-who-uses)
-(define-key boris-mode-map (kbd "C-c C-w C-i") 'boris-who-implements)
-(define-key boris-mode-map (kbd "C-c C-w i")   'boris-who-implements)
-(define-key boris-mode-map (kbd "C-c C-w C-e") 'boris-who-extends)
-(define-key boris-mode-map (kbd "C-c C-w e")   'boris-who-extends)
+(define-key boris-mode-map (kbd "C-c C-z") 'boris-restart-or-pop-back)
+(define-key boris-mode-map (kbd "C-c C-d") 'boris-doc-map)
+(define-key boris-mode-map (kbd "C-c C-w") 'boris-who-map)
+
+(easy-menu-define nil boris-mode-map
+  ""
+  boris-mode-menu)
 
 ;;;###autoload
 (defun boris (&optional command)
@@ -850,7 +891,7 @@ function."
 
 (defun boris-insert-tag (tag)
   (cl-destructuring-bind (&key kind name file line description arguments defined_in
-                            definitions)
+                            definitions &allow-other-keys)
       tag
     (cl-flet ((insert-xref (label file line)
                 (if (and file line)
