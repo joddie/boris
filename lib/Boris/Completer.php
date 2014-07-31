@@ -14,7 +14,20 @@ class Completer {
 
   private $evalWorker;
   private $parser;
-
+  private static $sources = array(
+    'variable'       => 'Boris\Completions\Variables',
+    'function'       => 'Boris\Completions\Functions',
+    'constant'       => 'Boris\Completions\Constant',
+    'keyword'        => 'Boris\Completions\Keywords',
+    'class'          => 'Boris\Completions\ClassNames',
+    'interface'      => 'Boris\Completions\Interfaces',
+    'trait'          => 'Boris\Completions\Traits',
+    'method'         => 'Boris\Completions\AllMethods',
+    'property'       => 'Boris\Completions\AllProperties',
+    'staticproperty' => 'Boris\Completions\AllStaticProperties',
+    'classconstant'  => 'Boris\Completions\AllClassConstants',
+  );
+  
   public function __construct($evalWorker) {
     $this->evalWorker = $evalWorker;
     $this->parser = new CompletionParser();
@@ -90,11 +103,40 @@ class Completer {
   }
 
   /**
+   * Complete a specified kind of symbol
+   */
+  public function completeSymbol($prefix, $kind, $scope = array(), $annotate = false) {
+    $source = $this->getSource($kind);
+    $completions = $source->completions($prefix);
+    if ($annotate) {
+      return self::annotations($completions);
+    } else {
+      return self::names($completions);
+    }
+  }
+
+  /**
    * Search all symbols and return full details.
    */
-  function apropos($filter, $scope, $kinds = array()) {
-    $source = new Completions\AllSymbols($scope);
+  function apropos($filter, $scope, $kind = null) {
+    $source = $this->getSource($kind);
     return self::annotations($source->apropos($filter));
+  }
+
+  private function getSource($kind, $scope = array()) {
+    if (!$kind) {
+      return new Completions\AllSymbols($scope);
+    } elseif (is_array($kind)) {
+      return new Completions\MergeSources(
+        array_map(array($this, 'getSource'), $kind)
+      );
+    } elseif (isset(self::$sources[$kind])) {
+      $class = self::$sources[$kind];
+      return new $class;
+    } else {
+      user_error("Invalid symbol type '$kind'", E_USER_WARNING);
+      return new Completions\None;
+    }
   }
 
   public function whoImplements($interface) {

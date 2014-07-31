@@ -131,6 +131,10 @@ class EvalWorker {
           $return = $this->_completer->getCompletions($input->line, $input->evaluate, $__scope, true);
           break;
 
+        case 'completesymbol':
+          $return = $this->_completer->completeSymbol($input->prefix, $input->kind, $__scope, $input->annotate);
+          break;
+          
         case 'hint':
           $return = $this->_completer->getHint($input->line, $input->evaluate, $__scope);
           break;

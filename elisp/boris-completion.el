@@ -847,7 +847,9 @@ function."
     (boris--show-tags-buffer tags)))
 
 (defun boris-who-implements (interface)
-  (interactive (list (boris--read-symbol "Interface")))
+  (interactive
+   (list
+    (boris--read-symbol "List classes that implement interface" 'interface)))
   (boris--show-tags-buffer
    (boris-call (list :operation :whoimplements
                      :interface interface))))
@@ -855,7 +857,7 @@ function."
 (defun boris-who-uses (trait)
   (interactive
    (list
-    (boris--read-symbol "Trait")))
+    (boris--read-symbol "List classes that use trait" 'trait)))
   (boris--show-tags-buffer
    (boris-call (list :operation :whouses
                      :trait trait))))
@@ -863,18 +865,22 @@ function."
 (defun boris-who-extends (class)
   (interactive
    (list
-    (boris--read-symbol "Class")))
+    (boris--read-symbol "List classes that extend class" 'class)))
   (boris--show-tags-buffer
    (boris-call (list :operation :whoextends
                      :class class))))
 
-(defun boris--read-symbol (prompt)
+(defun boris--read-symbol (prompt kind)
   (let ((default (thing-at-point 'symbol)))
-    (read-string
+    (completing-read
      (if default
          (format "%s (default `%s'): " prompt default)
        (format "%s: " prompt))
-     nil boris-apropos-history default)))
+     (boris-call (list :operation :completesymbol
+                       :kind kind
+                       :prefix ""
+                       :annotate nil))
+     nil nil nil boris-apropos-history default)))
 
 (defun boris--show-tags-buffer (tags)
   (if (zerop (length tags))
@@ -931,6 +937,59 @@ function."
       (widen)
       (goto-char (point-min))
       (forward-line (1- line)))))
+
+
+;;;; Display class hierarchy
+(require 'widget)
+
+(eval-when-compile
+  (require 'wid-edit))
+
+(defun boris-class-hierarchy ()
+  (interactive)
+  (let ((tags
+         (boris-call (list :operation :completesymbol
+                           :prefix ""
+                           :kind 'class
+                           :annotate t)))) 
+    (boris--display-hierarchy tags)))
+
+(defun boris--display-hierarchy (tags)
+  (interactive)
+  (switch-to-buffer "*Boris Classes*")
+  (kill-all-local-variables)
+  (let ((inhibit-read-only t))
+    (erase-buffer))
+  (remove-overlays)
+  (dolist (tag (boris--tags-hierarchy tags))
+    (apply 'widget-create
+           (boris--tag-to-widget tag)))
+  (use-local-map widget-keymap)
+  (widget-setup)
+  (goto-char (point-min)))
+
+(defun boris--tags-hierarchy (tags)
+  (let ((child-index (make-hash-table :test 'equal)))
+    (dolist (tag tags)
+      (let ((parent-name (plist-get tag :parent)))
+        (push tag (gethash parent-name child-index))))
+    
+    (cl-labels ((tag-with-children (tag)
+                  (let* ((tag-name (plist-get tag :name))
+                         (children
+                          (mapcar #'tag-with-children
+                                  (gethash tag-name child-index))))
+                    (plist-put tag :children children))))
+      (mapcar #'tag-with-children
+              (gethash nil child-index)))))
+
+(defun boris--tag-to-widget (tag)
+  (cl-destructuring-bind (&key name children description file line &allow-other-keys)
+      tag
+    `(tree-widget
+      :tag ,name
+      :open t
+      ,@(mapcar #'boris--tag-to-widget children))))
 
 
 
