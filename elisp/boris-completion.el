@@ -848,14 +848,16 @@ function."
   "Major mode for Boris symbol lookup buffers.")
 
 (defvar boris-apropos-mode-map
-  (make-composed-keymap special-mode-map button-buffer-map))
+  (make-composed-keymap button-buffer-map special-mode-map))
 
 (defvar boris-apropos-history nil)
 
 (defun boris-apropos (regexp)
   (interactive
    (list
-    (boris--read-symbol "Search for PHP symbol (PCRE regexp)")))
+    (boris--read-symbol "Search for PHP symbol (PCRE regexp or word list)")))
+  (when (string-match-p (rx (syntax whitespace)) regexp)
+    (setq regexp (split-string regexp)))
   (let ((tags
          (boris-call (list :operation :apropos
                            :regexp regexp))))
@@ -885,17 +887,19 @@ function."
    (boris-call (list :operation :whoextends
                      :class class))))
 
-(defun boris--read-symbol (prompt kind)
-  (let ((default (thing-at-point 'symbol)))
-    (completing-read
-     (if default
-         (format "%s (default `%s'): " prompt default)
-       (format "%s: " prompt))
-     (boris-call (list :operation :completesymbol
-                       :kind kind
-                       :prefix ""
-                       :annotate nil))
-     nil nil nil boris-apropos-history default)))
+(defun boris--read-symbol (prompt &optional kind)
+  (let* ((default (thing-at-point 'symbol))
+         (prompt (if default
+                     (format "%s (default `%s'): " prompt default)
+                   (format "%s: " prompt))))
+    (if kind
+        (completing-read prompt
+         (boris-call (list :operation :completesymbol
+                           :kind kind
+                           :prefix ""
+                           :annotate nil))
+         nil nil nil boris-apropos-history default)
+      (read-string prompt nil boris-apropos-history default))))
 
 (defun boris--show-tags-buffer (tags)
   (if (zerop (length tags))

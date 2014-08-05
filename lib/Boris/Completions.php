@@ -136,7 +136,22 @@ trait Apropos {
       $predicate = function ($symbol) use ($preg) {
         return preg_match($preg, (string) $symbol);
       };
+    } elseif (is_array($filter)) {
+      $regexps = array_map(function ($word) {
+        return '/' . $word . '/i';
+      }, $filter);
+      $predicate = function ($symbol) use ($regexps) {
+        $string = (string) $symbol;
+        foreach ($regexps as $regexp) {
+          if (!preg_match($regexp, $string)) return false;
+        }
+        return true;
+      };
+    } else {
+      user_error('Apropos filter should be string or array', E_USER_WARNING);
+      return array();
     }
+
     return array_filter($candidates, $predicate);
   }
 }
