@@ -430,7 +430,8 @@ comint buffers.")
 
 (boris-define-prefix-map boris-doc-map
   '((?d boris-get-documentation)
-    (?a boris-apropos)))
+    (?a boris-apropos)
+    (?p php-search-documentation)))
 
 ;; Menu items shared between minor mode and comint buffer
 (defvar boris-common-menu
