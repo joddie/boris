@@ -150,7 +150,12 @@ class CompletionParser {
         || ($match = $this->popMatch($tokens, array(T_DOUBLE_COLON, T_STRING)))) {
       list(, $method) = $match;
       $context = $this->getContext($tokens);
-      return $this->docInfo(self::METHOD_INFO, $method->text, $arg, $context);
+      if (!$context) {
+        return NULL;
+      }
+      else {
+        return $this->docInfo(self::METHOD_INFO, $method->text, $arg, $context);
+      }
     }
     elseif ($name = $this->popQualifiedName($tokens)) {
       if ($this->matchEnd($tokens, array(T_NEW))) {
@@ -160,7 +165,9 @@ class CompletionParser {
         return $this->docInfo(self::FUNCTION_INFO, $this->tokensText($name), $arg);
       }
     }
-    else return NULL;
+    else {
+      return NULL;
+    }
   }
 
   private function docInfo($how, $name, $count, $context = NULL) {
@@ -329,8 +336,8 @@ class CompletionParser {
       return (object) array('text' => $this->tokensText($match),
                             'is_bare' => $is_bare);
     }
-    else
-      return FALSE;
+    else {
+      return NULL;
+    }
   }
-
 }
